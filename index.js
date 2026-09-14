@@ -29,6 +29,7 @@ async function run() {
     const awardCollection = db.collection("awards");
     const experienceCollection = db.collection("experiences");
     const toolCollection = db.collection("tools");
+    const researchCollection = db.collection("researches");
 
     // CREATE USER
     app.post("/users", async (req, res) => {
@@ -470,6 +471,123 @@ async function run() {
         res.send({
           success: true,
           message: "Tool deleted successfully",
+          result,
+        });
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: "Invalid ID or Server Error",
+          error: error.message,
+        });
+      }
+    });
+
+    app.post("/researches", async (req, res) => {
+      try {
+        const research = req.body;
+        research.createdAt = new Date();
+
+        const result = await researchCollection.insertOne(research);
+        res.status(201).send({
+          success: true,
+          message: "Research paper/project added successfully",
+          result,
+        });
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: "Failed to add research",
+          error: error.message,
+        });
+      }
+    });
+
+    // 2. READ ALL RESEARCHES (সব রিসার্চ লিস্ট দেখা)
+    app.get("/researches", async (req, res) => {
+      try {
+        const result = await researchCollection
+          .find()
+          .sort({ createdAt: -1 })
+          .toArray();
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: "Failed to fetch researches",
+          error: error.message,
+        });
+      }
+    });
+
+    // 3. READ SINGLE RESEARCH BY ID (নির্দিষ্ট কোনো রিসার্চ দেখা)
+    app.get("/researches/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+        const query = { _id: new ObjectId(id) };
+        const research = await researchCollection.findOne(query);
+
+        if (!research) {
+          return res.status(404).send({ success: false, message: "Research not found" });
+        }
+
+        res.send(research);
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: "Invalid Research ID or Server Error",
+          error: error.message,
+        });
+      }
+    });
+
+    // 4. UPDATE RESEARCH (রিসার্চ তথ্য আপডেট করা)
+    app.patch("/researches/:id", async (req, res) => {
+      try {
+        const filter = { _id: new ObjectId(req.params.id) };
+        const updateData = { ...req.body };
+        delete updateData._id;
+
+        const updateDoc = {
+          $set: {
+            ...updateData,
+            updatedAt: new Date(),
+          },
+        };
+
+        const result = await researchCollection.updateOne(filter, updateDoc);
+
+        if (result.matchedCount === 0) {
+          return res.status(404).send({ success: false, message: "Research not found" });
+        }
+
+        res.send({
+          success: true,
+          message: "Research updated successfully",
+          result,
+        });
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: "Failed to update research",
+          error: error.message,
+        });
+      }
+    });
+
+    // 5. DELETE RESEARCH (রিসার্চ মুছে ফেলা)
+    app.delete("/researches/:id", async (req, res) => {
+      try {
+        const result = await researchCollection.deleteOne({
+          _id: new ObjectId(req.params.id),
+        });
+
+        if (result.deletedCount === 0) {
+          return res.status(404).send({ success: false, message: "Research not found" });
+        }
+
+        res.send({
+          success: true,
+          message: "Research deleted successfully",
           result,
         });
       } catch (error) {

@@ -27,6 +27,7 @@ async function run() {
     const db = client.db("ramen_kumar_das_db");
     const userCollection = db.collection("users");
     const awardCollection = db.collection("awards");
+    const experienceCollection = db.collection("experiences");
 
     // CREATE USER
     app.post("/users", async (req, res) => {
@@ -234,6 +235,123 @@ async function run() {
         res.send({
           success: true,
           message: "Award deleted successfully",
+          result,
+        });
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: "Invalid ID or Server Error",
+          error: error.message,
+        });
+      }
+    });
+
+    app.post("/experiences", async (req, res) => {
+      try {
+        const experience = req.body;
+        experience.createdAt = new Date();
+
+        const result = await experienceCollection.insertOne(experience);
+        res.status(201).send({
+          success: true,
+          message: "Experience added successfully",
+          result,
+        });
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: "Failed to add experience",
+          error: error.message,
+        });
+      }
+    });
+
+    // 2. READ ALL EXPERIENCES (সব এক্সপেরিয়েন্স দেখা)
+    app.get("/experiences", async (req, res) => {
+      try {
+        const result = await experienceCollection
+          .find()
+          .sort({ createdAt: -1 })
+          .toArray();
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: "Failed to fetch experiences",
+          error: error.message,
+        });
+      }
+    });
+
+    // 3. READ SINGLE EXPERIENCE BY ID (নির্দিষ্ট একটি এক্সপেরিয়েন্স দেখা)
+    app.get("/experiences/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+        const query = { _id: new ObjectId(id) };
+        const experience = await experienceCollection.findOne(query);
+
+        if (!experience) {
+          return res.status(404).send({ success: false, message: "Experience not found" });
+        }
+
+        res.send(experience);
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: "Invalid Experience ID or Server Error",
+          error: error.message,
+        });
+      }
+    });
+
+    // 4. UPDATE EXPERIENCE (এক্সপেরিয়েন্স আপডেট করা)
+    app.patch("/experiences/:id", async (req, res) => {
+      try {
+        const filter = { _id: new ObjectId(req.params.id) };
+        const updateData = { ...req.body };
+        delete updateData._id;
+
+        const updateDoc = {
+          $set: {
+            ...updateData,
+            updatedAt: new Date(),
+          },
+        };
+
+        const result = await experienceCollection.updateOne(filter, updateDoc);
+
+        if (result.matchedCount === 0) {
+          return res.status(404).send({ success: false, message: "Experience not found" });
+        }
+
+        res.send({
+          success: true,
+          message: "Experience updated successfully",
+          result,
+        });
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: "Failed to update experience",
+          error: error.message,
+        });
+      }
+    });
+
+    // 5. DELETE EXPERIENCE (এক্সপেরিয়েন্স ডিলেট করা)
+    app.delete("/experiences/:id", async (req, res) => {
+      try {
+        const result = await experienceCollection.deleteOne({
+          _id: new ObjectId(req.params.id),
+        });
+
+        if (result.deletedCount === 0) {
+          return res.status(404).send({ success: false, message: "Experience not found" });
+        }
+
+        res.send({
+          success: true,
+          message: "Experience deleted successfully",
           result,
         });
       } catch (error) {

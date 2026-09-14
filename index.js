@@ -26,6 +26,7 @@ async function run() {
 
     const db = client.db("ramen_kumar_das_db");
     const userCollection = db.collection("users");
+    const awardCollection = db.collection("awards");
 
     // CREATE USER
     app.post("/users", async (req, res) => {
@@ -122,6 +123,123 @@ async function run() {
         res.status(500).send({
           success: false,
           message: "Server Error",
+          error: error.message,
+        });
+      }
+    });
+
+    app.post("/awards", async (req, res) => {
+      try {
+        const award = req.body;
+        award.createdAt = new Date();
+
+        const result = await awardCollection.insertOne(award);
+        res.status(201).send({
+          success: true,
+          message: "Award added successfully",
+          result,
+        });
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: "Failed to add award",
+          error: error.message,
+        });
+      }
+    });
+
+    // 2. READ ALL AWARDS (সব আওয়ার্ড দেখা)
+    app.get("/awards", async (req, res) => {
+      try {
+        const result = await awardCollection
+          .find()
+          .sort({ createdAt: -1 })
+          .toArray();
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: "Failed to fetch awards",
+          error: error.message,
+        });
+      }
+    });
+
+    // 3. READ SINGLE AWARD BY ID (নির্দিষ্ট একটি আওয়ার্ড দেখা)
+    app.get("/awards/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+        const query = { _id: new ObjectId(id) };
+        const award = await awardCollection.findOne(query);
+
+        if (!award) {
+          return res.status(404).send({ success: false, message: "Award not found" });
+        }
+
+        res.send(award);
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: "Invalid Award ID or Server Error",
+          error: error.message,
+        });
+      }
+    });
+
+    // 4. UPDATE AWARD (আওয়ার্ড তথ্য আপডেট করা)
+    app.patch("/awards/:id", async (req, res) => {
+      try {
+        const filter = { _id: new ObjectId(req.params.id) };
+        const updateData = { ...req.body };
+        delete updateData._id; 
+
+        const updateDoc = {
+          $set: {
+            ...updateData,
+            updatedAt: new Date(),
+          },
+        };
+
+        const result = await awardCollection.updateOne(filter, updateDoc);
+
+        if (result.matchedCount === 0) {
+          return res.status(404).send({ success: false, message: "Award not found" });
+        }
+
+        res.send({
+          success: true,
+          message: "Award updated successfully",
+          result,
+        });
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: "Failed to update award",
+          error: error.message,
+        });
+      }
+    });
+
+    // 5. DELETE AWARD (আওয়ার্ড ডিলেট করা)
+    app.delete("/awards/:id", async (req, res) => {
+      try {
+        const result = await awardCollection.deleteOne({
+          _id: new ObjectId(req.params.id),
+        });
+
+        if (result.deletedCount === 0) {
+          return res.status(404).send({ success: false, message: "Award not found" });
+        }
+
+        res.send({
+          success: true,
+          message: "Award deleted successfully",
+          result,
+        });
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: "Invalid ID or Server Error",
           error: error.message,
         });
       }

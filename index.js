@@ -31,6 +31,9 @@ async function run() {
     const toolCollection = db.collection("tools");
     const researchCollection = db.collection("researches");
     const courseCollection = db.collection("courses");
+    const academicCollection = db.collection("academics");
+    const galleryCollection = db.collection("gallery");
+    const refereeCollection = db.collection("referees");
 
     // CREATE USER
     app.post("/users", async (req, res) => {
@@ -706,6 +709,357 @@ async function run() {
         res.send({
           success: true,
           message: "Course deleted successfully",
+          result,
+        });
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: "Invalid ID or Server Error",
+          error: error.message,
+        });
+      }
+    });
+
+    app.post("/academics", async (req, res) => {
+      try {
+        const academic = req.body;
+        academic.createdAt = new Date();
+
+        const result = await academicCollection.insertOne(academic);
+        res.status(201).send({
+          success: true,
+          message: "Academic record added successfully",
+          result,
+        });
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: "Failed to add academic record",
+          error: error.message,
+        });
+      }
+    });
+
+    // 2. READ ALL ACADEMIC RECORDS (সব শিক্ষাগত তথ্য দেখা)
+    app.get("/academics", async (req, res) => {
+      try {
+        const result = await academicCollection
+          .find()
+          .sort({ createdAt: -1 })
+          .toArray();
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: "Failed to fetch academic records",
+          error: error.message,
+        });
+      }
+    });
+
+    // 3. READ SINGLE ACADEMIC RECORD BY ID (নির্দিষ্ট একটি শিক্ষাগত রেকর্ড দেখা)
+    app.get("/academics/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+        const query = { _id: new ObjectId(id) };
+        const academic = await academicCollection.findOne(query);
+
+        if (!academic) {
+          return res.status(404).send({ success: false, message: "Academic record not found" });
+        }
+
+        res.send(academic);
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: "Invalid Academic ID or Server Error",
+          error: error.message,
+        });
+      }
+    });
+
+    // 4. UPDATE ACADEMIC RECORD (শিক্ষাগত তথ্য আপডেট করা)
+    app.patch("/academics/:id", async (req, res) => {
+      try {
+        const filter = { _id: new ObjectId(req.params.id) };
+        const updateData = { ...req.body };
+        delete updateData._id;
+
+        const updateDoc = {
+          $set: {
+            ...updateData,
+            updatedAt: new Date(),
+          },
+        };
+
+        const result = await academicCollection.updateOne(filter, updateDoc);
+
+        if (result.matchedCount === 0) {
+          return res.status(404).send({ success: false, message: "Academic record not found" });
+        }
+
+        res.send({
+          success: true,
+          message: "Academic record updated successfully",
+          result,
+        });
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: "Failed to update academic record",
+          error: error.message,
+        });
+      }
+    });
+
+    // 5. DELETE ACADEMIC RECORD (শিক্ষাগত তথ্য মুছে ফেলা)
+    app.delete("/academics/:id", async (req, res) => {
+      try {
+        const result = await academicCollection.deleteOne({
+          _id: new ObjectId(req.params.id),
+        });
+
+        if (result.deletedCount === 0) {
+          return res.status(404).send({ success: false, message: "Academic record not found" });
+        }
+
+        res.send({
+          success: true,
+          message: "Academic record deleted successfully",
+          result,
+        });
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: "Invalid ID or Server Error",
+          error: error.message,
+        });
+      }
+    });
+
+    app.post("/gallery", async (req, res) => {
+      try {
+        const item = req.body;
+        item.createdAt = new Date();
+
+        const result = await galleryCollection.insertOne(item);
+        res.status(201).send({
+          success: true,
+          message: "Gallery item added successfully",
+          result,
+        });
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: "Failed to add gallery item",
+          error: error.message,
+        });
+      }
+    });
+
+    // 2. READ ALL GALLERY ITEMS (গ্যালারির সব আইটেম দেখা)
+    app.get("/gallery", async (req, res) => {
+      try {
+        const result = await galleryCollection
+          .find()
+          .sort({ createdAt: -1 })
+          .toArray();
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: "Failed to fetch gallery items",
+          error: error.message,
+        });
+      }
+    });
+
+    // 3. READ SINGLE GALLERY ITEM BY ID (নির্দিষ্ট একটি গ্যালারি আইটেম দেখা)
+    app.get("/gallery/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+        const query = { _id: new ObjectId(id) };
+        const item = await galleryCollection.findOne(query);
+
+        if (!item) {
+          return res.status(404).send({ success: false, message: "Gallery item not found" });
+        }
+
+        res.send(item);
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: "Invalid Gallery ID or Server Error",
+          error: error.message,
+        });
+      }
+    });
+
+    // 4. UPDATE GALLERY ITEM (গ্যালারি আইটেমের তথ্য আপডেট করা)
+    app.patch("/gallery/:id", async (req, res) => {
+      try {
+        const filter = { _id: new ObjectId(req.params.id) };
+        const updateData = { ...req.body };
+        delete updateData._id;
+
+        const updateDoc = {
+          $set: {
+            ...updateData,
+            updatedAt: new Date(),
+          },
+        };
+
+        const result = await galleryCollection.updateOne(filter, updateDoc);
+
+        if (result.matchedCount === 0) {
+          return res.status(404).send({ success: false, message: "Gallery item not found" });
+        }
+
+        res.send({
+          success: true,
+          message: "Gallery item updated successfully",
+          result,
+        });
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: "Failed to update gallery item",
+          error: error.message,
+        });
+      }
+    });
+
+    // 5. DELETE GALLERY ITEM (গ্যালারি আইটেম মুছে ফেলা)
+    app.delete("/gallery/:id", async (req, res) => {
+      try {
+        const result = await galleryCollection.deleteOne({
+          _id: new ObjectId(req.params.id),
+        });
+
+        if (result.deletedCount === 0) {
+          return res.status(404).send({ success: false, message: "Gallery item not found" });
+        }
+
+        res.send({
+          success: true,
+          message: "Gallery item deleted successfully",
+          result,
+        });
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: "Invalid ID or Server Error",
+          error: error.message,
+        });
+      }
+    });
+
+    app.post("/referees", async (req, res) => {
+      try {
+        const referee = req.body;
+        referee.createdAt = new Date();
+
+        const result = await refereeCollection.insertOne(referee);
+        res.status(201).send({
+          success: true,
+          message: "Referee added successfully",
+          result,
+        });
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: "Failed to add referee",
+          error: error.message,
+        });
+      }
+    });
+
+    // 2. READ ALL REFEREES (সব রেফারি তথ্য দেখা)
+    app.get("/referees", async (req, res) => {
+      try {
+        const result = await refereeCollection
+          .find()
+          .sort({ createdAt: -1 })
+          .toArray();
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: "Failed to fetch referees",
+          error: error.message,
+        });
+      }
+    });
+
+    // 3. READ SINGLE REFEREE BY ID (নির্দিষ্ট এক রেফারি তথ্য দেখা)
+    app.get("/referees/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+        const query = { _id: new ObjectId(id) };
+        const referee = await refereeCollection.findOne(query);
+
+        if (!referee) {
+          return res.status(404).send({ success: false, message: "Referee not found" });
+        }
+
+        res.send(referee);
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: "Invalid Referee ID or Server Error",
+          error: error.message,
+        });
+      }
+    });
+
+    // 4. UPDATE REFEREE (রেফারির নাম, পদবী, ইমেইল, বা ফোন আপডেট করা)
+    app.patch("/referees/:id", async (req, res) => {
+      try {
+        const filter = { _id: new ObjectId(req.params.id) };
+        const updateData = { ...req.body };
+        delete updateData._id;
+
+        const updateDoc = {
+          $set: {
+            ...updateData,
+            updatedAt: new Date(),
+          },
+        };
+
+        const result = await refereeCollection.updateOne(filter, updateDoc);
+
+        if (result.matchedCount === 0) {
+          return res.status(404).send({ success: false, message: "Referee not found" });
+        }
+
+        res.send({
+          success: true,
+          message: "Referee updated successfully",
+          result,
+        });
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: "Failed to update referee",
+          error: error.message,
+        });
+      }
+    });
+
+    // 5. DELETE REFEREE (রেফারি মুছে ফেলা)
+    app.delete("/referees/:id", async (req, res) => {
+      try {
+        const result = await refereeCollection.deleteOne({
+          _id: new ObjectId(req.params.id),
+        });
+
+        if (result.deletedCount === 0) {
+          return res.status(404).send({ success: false, message: "Referee not found" });
+        }
+
+        res.send({
+          success: true,
+          message: "Referee deleted successfully",
           result,
         });
       } catch (error) {

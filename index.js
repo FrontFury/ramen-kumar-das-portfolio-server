@@ -30,6 +30,7 @@ async function run() {
     const experienceCollection = db.collection("experiences");
     const toolCollection = db.collection("tools");
     const researchCollection = db.collection("researches");
+    const courseCollection = db.collection("courses");
 
     // CREATE USER
     app.post("/users", async (req, res) => {
@@ -588,6 +589,123 @@ async function run() {
         res.send({
           success: true,
           message: "Research deleted successfully",
+          result,
+        });
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: "Invalid ID or Server Error",
+          error: error.message,
+        });
+      }
+    });
+
+    app.post("/courses", async (req, res) => {
+      try {
+        const course = req.body;
+        course.createdAt = new Date();
+
+        const result = await courseCollection.insertOne(course);
+        res.status(201).send({
+          success: true,
+          message: "Course added successfully",
+          result,
+        });
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: "Failed to add course",
+          error: error.message,
+        });
+      }
+    });
+
+    // 2. READ ALL COURSES (সব কোর্সের তালিকা পাওয়া)
+    app.get("/courses", async (req, res) => {
+      try {
+        const result = await courseCollection
+          .find()
+          .sort({ createdAt: -1 })
+          .toArray();
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: "Failed to fetch courses",
+          error: error.message,
+        });
+      }
+    });
+
+    // 3. READ SINGLE COURSE BY ID (নির্দিষ্ট কোনো কোর্সের বিস্তারিত তথ্য দেখা)
+    app.get("/courses/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+        const query = { _id: new ObjectId(id) };
+        const course = await courseCollection.findOne(query);
+
+        if (!course) {
+          return res.status(404).send({ success: false, message: "Course not found" });
+        }
+
+        res.send(course);
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: "Invalid Course ID or Server Error",
+          error: error.message,
+        });
+      }
+    });
+
+    // 4. UPDATE COURSE (কোর্সের তথ্য যেমন: Title, Description, Duration ইত্যাদি আপডেট করা)
+    app.patch("/courses/:id", async (req, res) => {
+      try {
+        const filter = { _id: new ObjectId(req.params.id) };
+        const updateData = { ...req.body };
+        delete updateData._id;
+
+        const updateDoc = {
+          $set: {
+            ...updateData,
+            updatedAt: new Date(),
+          },
+        };
+
+        const result = await courseCollection.updateOne(filter, updateDoc);
+
+        if (result.matchedCount === 0) {
+          return res.status(404).send({ success: false, message: "Course not found" });
+        }
+
+        res.send({
+          success: true,
+          message: "Course updated successfully",
+          result,
+        });
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: "Failed to update course",
+          error: error.message,
+        });
+      }
+    });
+
+    // 5. DELETE COURSE (কোর্স মুছে ফেলা)
+    app.delete("/courses/:id", async (req, res) => {
+      try {
+        const result = await courseCollection.deleteOne({
+          _id: new ObjectId(req.params.id),
+        });
+
+        if (result.deletedCount === 0) {
+          return res.status(404).send({ success: false, message: "Course not found" });
+        }
+
+        res.send({
+          success: true,
+          message: "Course deleted successfully",
           result,
         });
       } catch (error) {

@@ -28,6 +28,7 @@ async function run() {
     const userCollection = db.collection("users");
     const awardCollection = db.collection("awards");
     const experienceCollection = db.collection("experiences");
+    const toolCollection = db.collection("tools");
 
     // CREATE USER
     app.post("/users", async (req, res) => {
@@ -352,6 +353,123 @@ async function run() {
         res.send({
           success: true,
           message: "Experience deleted successfully",
+          result,
+        });
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: "Invalid ID or Server Error",
+          error: error.message,
+        });
+      }
+    });
+
+    app.post("/tools", async (req, res) => {
+      try {
+        const tool = req.body;
+        tool.createdAt = new Date();
+
+        const result = await toolCollection.insertOne(tool);
+        res.status(201).send({
+          success: true,
+          message: "Tool added successfully",
+          result,
+        });
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: "Failed to add tool",
+          error: error.message,
+        });
+      }
+    });
+
+    // 2. READ ALL TOOLS (সব টুল পাওয়া)
+    app.get("/tools", async (req, res) => {
+      try {
+        const result = await toolCollection
+          .find()
+          .sort({ createdAt: -1 })
+          .toArray();
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: "Failed to fetch tools",
+          error: error.message,
+        });
+      }
+    });
+
+    // 3. READ SINGLE TOOL BY ID (নির্দিষ্ট কোনো টুল পাওয়া)
+    app.get("/tools/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+        const query = { _id: new ObjectId(id) };
+        const tool = await toolCollection.findOne(query);
+
+        if (!tool) {
+          return res.status(404).send({ success: false, message: "Tool not found" });
+        }
+
+        res.send(tool);
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: "Invalid Tool ID or Server Error",
+          error: error.message,
+        });
+      }
+    });
+
+    // 4. UPDATE TOOL (টুলের তথ্য আপডেট করা)
+    app.patch("/tools/:id", async (req, res) => {
+      try {
+        const filter = { _id: new ObjectId(req.params.id) };
+        const updateData = { ...req.body };
+        delete updateData._id;
+
+        const updateDoc = {
+          $set: {
+            ...updateData,
+            updatedAt: new Date(),
+          },
+        };
+
+        const result = await toolCollection.updateOne(filter, updateDoc);
+
+        if (result.matchedCount === 0) {
+          return res.status(404).send({ success: false, message: "Tool not found" });
+        }
+
+        res.send({
+          success: true,
+          message: "Tool updated successfully",
+          result,
+        });
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: "Failed to update tool",
+          error: error.message,
+        });
+      }
+    });
+
+    // 5. DELETE TOOL (টুল মুছে ফেলা)
+    app.delete("/tools/:id", async (req, res) => {
+      try {
+        const result = await toolCollection.deleteOne({
+          _id: new ObjectId(req.params.id),
+        });
+
+        if (result.deletedCount === 0) {
+          return res.status(404).send({ success: false, message: "Tool not found" });
+        }
+
+        res.send({
+          success: true,
+          message: "Tool deleted successfully",
           result,
         });
       } catch (error) {

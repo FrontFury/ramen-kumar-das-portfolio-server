@@ -8,7 +8,8 @@ const port = process.env.PORT || 3000;
 
 // Middleware
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: "10mb" }));
+app.use(express.urlencoded({ limit: "10mb", extended: true }));
 
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.td56s.mongodb.net/?appName=Cluster0`;
 
@@ -34,6 +35,8 @@ async function run() {
     const academicCollection = db.collection("academics");
     const galleryCollection = db.collection("gallery");
     const refereeCollection = db.collection("referees");
+    const projectSupervisionCollection = db.collection("project-supervisions");
+    const workshopCollection = db.collection("workshops");
 
     // CREATE USER
     app.post("/users", async (req, res) => {
@@ -55,7 +58,11 @@ async function run() {
       } catch (error) {
         res
           .status(500)
-          .send({ success: false, message: "Failed to create user", error: error.message });
+          .send({
+            success: false,
+            message: "Failed to create user",
+            error: error.message,
+          });
       }
     });
 
@@ -70,7 +77,11 @@ async function run() {
       } catch (error) {
         res
           .status(500)
-          .send({ success: false, message: "Failed to fetch users", error: error.message });
+          .send({
+            success: false,
+            message: "Failed to fetch users",
+            error: error.message,
+          });
       }
     });
 
@@ -135,6 +146,17 @@ async function run() {
       }
     });
 
+    app.get("/users/role/:email", async (req, res) => {
+      const email = req.params.email;
+      const user = await userCollection.findOne({ email });
+
+      if (user) {
+        res.send({ role: user.role }); // Output: { role: "admin" }
+      } else {
+        res.status(444).send({ role: "user" });
+      }
+    });
+
     app.post("/awards", async (req, res) => {
       try {
         const award = req.body;
@@ -180,7 +202,9 @@ async function run() {
         const award = await awardCollection.findOne(query);
 
         if (!award) {
-          return res.status(404).send({ success: false, message: "Award not found" });
+          return res
+            .status(404)
+            .send({ success: false, message: "Award not found" });
         }
 
         res.send(award);
@@ -193,12 +217,11 @@ async function run() {
       }
     });
 
-    // 4. UPDATE AWARD (আওয়ার্ড তথ্য আপডেট করা)
     app.patch("/awards/:id", async (req, res) => {
       try {
         const filter = { _id: new ObjectId(req.params.id) };
         const updateData = { ...req.body };
-        delete updateData._id; 
+        delete updateData._id;
 
         const updateDoc = {
           $set: {
@@ -210,7 +233,9 @@ async function run() {
         const result = await awardCollection.updateOne(filter, updateDoc);
 
         if (result.matchedCount === 0) {
-          return res.status(404).send({ success: false, message: "Award not found" });
+          return res
+            .status(404)
+            .send({ success: false, message: "Award not found" });
         }
 
         res.send({
@@ -235,7 +260,9 @@ async function run() {
         });
 
         if (result.deletedCount === 0) {
-          return res.status(404).send({ success: false, message: "Award not found" });
+          return res
+            .status(404)
+            .send({ success: false, message: "Award not found" });
         }
 
         res.send({
@@ -297,7 +324,9 @@ async function run() {
         const experience = await experienceCollection.findOne(query);
 
         if (!experience) {
-          return res.status(404).send({ success: false, message: "Experience not found" });
+          return res
+            .status(404)
+            .send({ success: false, message: "Experience not found" });
         }
 
         res.send(experience);
@@ -327,7 +356,9 @@ async function run() {
         const result = await experienceCollection.updateOne(filter, updateDoc);
 
         if (result.matchedCount === 0) {
-          return res.status(404).send({ success: false, message: "Experience not found" });
+          return res
+            .status(404)
+            .send({ success: false, message: "Experience not found" });
         }
 
         res.send({
@@ -352,7 +383,9 @@ async function run() {
         });
 
         if (result.deletedCount === 0) {
-          return res.status(404).send({ success: false, message: "Experience not found" });
+          return res
+            .status(404)
+            .send({ success: false, message: "Experience not found" });
         }
 
         res.send({
@@ -414,7 +447,9 @@ async function run() {
         const tool = await toolCollection.findOne(query);
 
         if (!tool) {
-          return res.status(404).send({ success: false, message: "Tool not found" });
+          return res
+            .status(404)
+            .send({ success: false, message: "Tool not found" });
         }
 
         res.send(tool);
@@ -444,7 +479,9 @@ async function run() {
         const result = await toolCollection.updateOne(filter, updateDoc);
 
         if (result.matchedCount === 0) {
-          return res.status(404).send({ success: false, message: "Tool not found" });
+          return res
+            .status(404)
+            .send({ success: false, message: "Tool not found" });
         }
 
         res.send({
@@ -469,7 +506,9 @@ async function run() {
         });
 
         if (result.deletedCount === 0) {
-          return res.status(404).send({ success: false, message: "Tool not found" });
+          return res
+            .status(404)
+            .send({ success: false, message: "Tool not found" });
         }
 
         res.send({
@@ -531,7 +570,9 @@ async function run() {
         const research = await researchCollection.findOne(query);
 
         if (!research) {
-          return res.status(404).send({ success: false, message: "Research not found" });
+          return res
+            .status(404)
+            .send({ success: false, message: "Research not found" });
         }
 
         res.send(research);
@@ -561,7 +602,9 @@ async function run() {
         const result = await researchCollection.updateOne(filter, updateDoc);
 
         if (result.matchedCount === 0) {
-          return res.status(404).send({ success: false, message: "Research not found" });
+          return res
+            .status(404)
+            .send({ success: false, message: "Research not found" });
         }
 
         res.send({
@@ -586,7 +629,9 @@ async function run() {
         });
 
         if (result.deletedCount === 0) {
-          return res.status(404).send({ success: false, message: "Research not found" });
+          return res
+            .status(404)
+            .send({ success: false, message: "Research not found" });
         }
 
         res.send({
@@ -648,7 +693,9 @@ async function run() {
         const course = await courseCollection.findOne(query);
 
         if (!course) {
-          return res.status(404).send({ success: false, message: "Course not found" });
+          return res
+            .status(404)
+            .send({ success: false, message: "Course not found" });
         }
 
         res.send(course);
@@ -678,7 +725,9 @@ async function run() {
         const result = await courseCollection.updateOne(filter, updateDoc);
 
         if (result.matchedCount === 0) {
-          return res.status(404).send({ success: false, message: "Course not found" });
+          return res
+            .status(404)
+            .send({ success: false, message: "Course not found" });
         }
 
         res.send({
@@ -703,7 +752,9 @@ async function run() {
         });
 
         if (result.deletedCount === 0) {
-          return res.status(404).send({ success: false, message: "Course not found" });
+          return res
+            .status(404)
+            .send({ success: false, message: "Course not found" });
         }
 
         res.send({
@@ -757,7 +808,6 @@ async function run() {
       }
     });
 
-    // 3. READ SINGLE ACADEMIC RECORD BY ID (নির্দিষ্ট একটি শিক্ষাগত রেকর্ড দেখা)
     app.get("/academics/:id", async (req, res) => {
       try {
         const id = req.params.id;
@@ -765,7 +815,9 @@ async function run() {
         const academic = await academicCollection.findOne(query);
 
         if (!academic) {
-          return res.status(404).send({ success: false, message: "Academic record not found" });
+          return res
+            .status(404)
+            .send({ success: false, message: "Academic record not found" });
         }
 
         res.send(academic);
@@ -795,7 +847,9 @@ async function run() {
         const result = await academicCollection.updateOne(filter, updateDoc);
 
         if (result.matchedCount === 0) {
-          return res.status(404).send({ success: false, message: "Academic record not found" });
+          return res
+            .status(404)
+            .send({ success: false, message: "Academic record not found" });
         }
 
         res.send({
@@ -820,7 +874,9 @@ async function run() {
         });
 
         if (result.deletedCount === 0) {
-          return res.status(404).send({ success: false, message: "Academic record not found" });
+          return res
+            .status(404)
+            .send({ success: false, message: "Academic record not found" });
         }
 
         res.send({
@@ -882,7 +938,9 @@ async function run() {
         const item = await galleryCollection.findOne(query);
 
         if (!item) {
-          return res.status(404).send({ success: false, message: "Gallery item not found" });
+          return res
+            .status(404)
+            .send({ success: false, message: "Gallery item not found" });
         }
 
         res.send(item);
@@ -912,7 +970,9 @@ async function run() {
         const result = await galleryCollection.updateOne(filter, updateDoc);
 
         if (result.matchedCount === 0) {
-          return res.status(404).send({ success: false, message: "Gallery item not found" });
+          return res
+            .status(404)
+            .send({ success: false, message: "Gallery item not found" });
         }
 
         res.send({
@@ -937,7 +997,9 @@ async function run() {
         });
 
         if (result.deletedCount === 0) {
-          return res.status(404).send({ success: false, message: "Gallery item not found" });
+          return res
+            .status(404)
+            .send({ success: false, message: "Gallery item not found" });
         }
 
         res.send({
@@ -999,7 +1061,9 @@ async function run() {
         const referee = await refereeCollection.findOne(query);
 
         if (!referee) {
-          return res.status(404).send({ success: false, message: "Referee not found" });
+          return res
+            .status(404)
+            .send({ success: false, message: "Referee not found" });
         }
 
         res.send(referee);
@@ -1029,7 +1093,9 @@ async function run() {
         const result = await refereeCollection.updateOne(filter, updateDoc);
 
         if (result.matchedCount === 0) {
-          return res.status(404).send({ success: false, message: "Referee not found" });
+          return res
+            .status(404)
+            .send({ success: false, message: "Referee not found" });
         }
 
         res.send({
@@ -1054,7 +1120,9 @@ async function run() {
         });
 
         if (result.deletedCount === 0) {
-          return res.status(404).send({ success: false, message: "Referee not found" });
+          return res
+            .status(404)
+            .send({ success: false, message: "Referee not found" });
         }
 
         res.send({
@@ -1071,8 +1139,269 @@ async function run() {
       }
     });
 
+    app.post("/project-supervision", async (req, res) => {
+      try {
+        const supervision = req.body;
+        supervision.createdAt = new Date();
+
+        const result =
+          await projectSupervisionCollection.insertOne(supervision);
+        res.status(201).send({
+          success: true,
+          message: "Project supervision record added successfully",
+          result,
+        });
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: "Failed to add project supervision record",
+          error: error.message,
+        });
+      }
+    });
+
+    // 2. READ ALL PROJECT SUPERVISIONS
+    app.get("/project-supervision", async (req, res) => {
+      try {
+        const result = await projectSupervisionCollection
+          .find()
+          .sort({ createdAt: -1 })
+          .toArray();
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: "Failed to fetch project supervision records",
+          error: error.message,
+        });
+      }
+    });
+
+    // 3. READ SINGLE PROJECT SUPERVISION BY ID
+    app.get("/project-supervision/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+        const query = { _id: new ObjectId(id) };
+        const supervision = await projectSupervisionCollection.findOne(query);
+
+        if (!supervision) {
+          return res
+            .status(404)
+            .send({
+              success: false,
+              message: "Project supervision record not found",
+            });
+        }
+
+        res.send(supervision);
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: "Invalid Project Supervision ID or Server Error",
+          error: error.message,
+        });
+      }
+    });
+
+    // 4. UPDATE PROJECT SUPERVISION
+    app.patch("/project-supervision/:id", async (req, res) => {
+      try {
+        const filter = { _id: new ObjectId(req.params.id) };
+        const updateData = { ...req.body };
+        delete updateData._id;
+
+        const updateDoc = {
+          $set: {
+            ...updateData,
+            updatedAt: new Date(),
+          },
+        };
+
+        const result = await projectSupervisionCollection.updateOne(
+          filter,
+          updateDoc,
+        );
+
+        if (result.matchedCount === 0) {
+          return res
+            .status(404)
+            .send({
+              success: false,
+              message: "Project supervision record not found",
+            });
+        }
+
+        res.send({
+          success: true,
+          message: "Project supervision record updated successfully",
+          result,
+        });
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: "Failed to update project supervision record",
+          error: error.message,
+        });
+      }
+    });
+
+    // 5. DELETE PROJECT SUPERVISION
+    app.delete("/project-supervision/:id", async (req, res) => {
+      try {
+        const result = await projectSupervisionCollection.deleteOne({
+          _id: new ObjectId(req.params.id),
+        });
+
+        if (result.deletedCount === 0) {
+          return res
+            .status(404)
+            .send({
+              success: false,
+              message: "Project supervision record not found",
+            });
+        }
+
+        res.send({
+          success: true,
+          message: "Project supervision record deleted successfully",
+          result,
+        });
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: "Invalid ID or Server Error",
+          error: error.message,
+        });
+      }
+    });
+
+    app.post("/workshops", async (req, res) => {
+      try {
+        const workshop = req.body;
+        workshop.createdAt = new Date();
+
+        const result = await workshopCollection.insertOne(workshop);
+        res.status(201).send({
+          success: true,
+          message: "Workshop added successfully",
+          result,
+        });
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: "Failed to add workshop",
+          error: error.message,
+        });
+      }
+    });
+
+    // 2. READ ALL WORKSHOPS
+    app.get("/workshops", async (req, res) => {
+      try {
+        const result = await workshopCollection
+          .find()
+          .sort({ createdAt: -1 })
+          .toArray();
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: "Failed to fetch workshops",
+          error: error.message,
+        });
+      }
+    });
+
+    // 3. READ SINGLE WORKSHOP BY ID
+    app.get("/workshops/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+        const query = { _id: new ObjectId(id) };
+        const workshop = await workshopCollection.findOne(query);
+
+        if (!workshop) {
+          return res
+            .status(404)
+            .send({ success: false, message: "Workshop not found" });
+        }
+
+        res.send(workshop);
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: "Invalid Workshop ID or Server Error",
+          error: error.message,
+        });
+      }
+    });
+
+    // 4. UPDATE WORKSHOP
+    app.patch("/workshops/:id", async (req, res) => {
+      try {
+        const filter = { _id: new ObjectId(req.params.id) };
+        const updateData = { ...req.body };
+        delete updateData._id;
+
+        const updateDoc = {
+          $set: {
+            ...updateData,
+            updatedAt: new Date(),
+          },
+        };
+
+        const result = await workshopCollection.updateOne(filter, updateDoc);
+
+        if (result.matchedCount === 0) {
+          return res
+            .status(404)
+            .send({ success: false, message: "Workshop not found" });
+        }
+
+        res.send({
+          success: true,
+          message: "Workshop updated successfully",
+          result,
+        });
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: "Failed to update workshop",
+          error: error.message,
+        });
+      }
+    });
+
+    // 5. DELETE WORKSHOP
+    app.delete("/workshops/:id", async (req, res) => {
+      try {
+        const result = await workshopCollection.deleteOne({
+          _id: new ObjectId(req.params.id),
+        });
+
+        if (result.deletedCount === 0) {
+          return res
+            .status(404)
+            .send({ success: false, message: "Workshop not found" });
+        }
+
+        res.send({
+          success: true,
+          message: "Workshop deleted successfully",
+          result,
+        });
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: "Invalid ID or Server Error",
+          error: error.message,
+        });
+      }
+    });
+
     await client.db("admin").command({ ping: 1 });
-    console.log("Pinged your deployment. You successfully connected to MongoDB!");
+    console.log(
+      "Pinged your deployment. You successfully connected to MongoDB!",
+    );
   } catch (error) {
     console.error("Database connection error:", error);
   }

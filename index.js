@@ -1,31 +1,29 @@
 require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
-const app = express();
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
-
-const port = process.env.PORT || 3000;
-
 const { initializeApp, cert, getApps } = require("firebase-admin/app");
 const { getAuth } = require("firebase-admin/auth");
 
-const decoded = Buffer.from(process.env.FB_SERVICE_KEY, "base64").toString(
-  "utf8",
-);
+const app = express();
+const port = process.env.PORT || 3000;
+
+// Firebase Admin Setup
+const decoded = Buffer.from(process.env.FB_SERVICE_KEY, "base64").toString("utf8");
 const serviceAccount = JSON.parse(decoded);
 
-// Firebase Admin Initialize (Duplicate Check সহ)
 if (!getApps().length) {
   initializeApp({
     credential: cert(serviceAccount),
   });
 }
 
-// Middleware
+// Middlewares
 app.use(cors());
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ limit: "10mb", extended: true }));
 
+// Custom Auth Middleware
 const verifyFBToken = async (req, res, next) => {
   const authHeader = req.headers?.authorization;
 
@@ -35,11 +33,9 @@ const verifyFBToken = async (req, res, next) => {
 
   try {
     const idToken = authHeader.split(" ")[1];
-    const decoded = await getAuth().verifyIdToken(idToken);
+    const decodedToken = await getAuth().verifyIdToken(idToken);
 
-    console.log("Decoded Token User:", decoded);
-    req.decoded_email = decoded.email;
-
+    req.decoded_email = decodedToken.email;
     next();
   } catch (err) {
     console.error("Token Verification Error:", err.message);
@@ -49,8 +45,8 @@ const verifyFBToken = async (req, res, next) => {
   }
 };
 
+// MongoDB Setup
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.td56s.mongodb.net/?appName=Cluster0`;
-
 const client = new MongoClient(uri, {
   serverApi: {
     version: ServerApiVersion.v1,
@@ -58,6 +54,7 @@ const client = new MongoClient(uri, {
     deprecationErrors: true,
   },
 });
+
 let serverReady = null;
 
 async function run() {
@@ -77,8 +74,9 @@ async function run() {
     const projectSupervisionCollection = db.collection("project-supervisions");
     const workshopCollection = db.collection("workshops");
 
+    // Admin Middleware
     const verifyAdmin = async (req, res, next) => {
-      const email = req.decodedUser?.email || req.decoded_email;
+      const email = req.decoded_email;
       const query = { email };
       const user = await userCollection.findOne(query);
 
@@ -89,11 +87,10 @@ async function run() {
       next();
     };
 
-    // CREATE USER
+    // USERS ROUTES
     app.post("/users", async (req, res) => {
       try {
         const user = req.body;
-
         const userExists = await userCollection.findOne({ email: user.email });
         if (userExists) {
           return res
@@ -115,8 +112,7 @@ async function run() {
       }
     });
 
-    // READ ALL USERS
-    app.get("/users", verifyFBToken, verifyAdmin, async (req, res) => {
+    app.get("/users", async (req, res) => {
       try {
         const result = await userCollection
           .find()
@@ -132,7 +128,49 @@ async function run() {
       }
     });
 
-    // DELETE USER
+    app.get("/users/role/:email", async (req, res) => {
+      const email = req.params.email;
+      const user = await userCollection.findOne({ email });
+
+      if (user) {
+        res.send({ role: user.role });
+      } else {
+        res.status(404).send({ role: "user" });
+      }
+    });
+
+    app.patch("/users/:id/role", verifyFBToken, verifyAdmin, async (req, res) => {
+      try {
+        const filter = { _id: new ObjectId(req.params.id) };
+        const updatedUserData = { ...req.body };
+        delete updatedUserData._id;
+
+        const existingUser = await userCollection.findOne(filter);
+        if (!existingUser) {
+          return res
+            .status(404)
+            .send({ success: false, message: "User not found" });
+        }
+
+        const updateDoc = {
+          $set: { ...updatedUserData, updatedAt: new Date() },
+        };
+        const result = await userCollection.updateOne(filter, updateDoc);
+
+        res.send({
+          success: true,
+          message: "User role updated successfully",
+          result,
+        });
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: "Server Error",
+          error: error.message,
+        });
+      }
+    });
+
     app.delete("/users/:id", verifyFBToken, verifyAdmin, async (req, res) => {
       try {
         const result = await userCollection.deleteOne({
@@ -159,56 +197,7 @@ async function run() {
       }
     });
 
-    // UPDATE USER / ROLE
-    app.patch(
-      "/users/:id/role",
-      verifyFBToken,
-      verifyAdmin,
-      async (req, res) => {
-        try {
-          const filter = { _id: new ObjectId(req.params.id) };
-          const updatedUserData = { ...req.body };
-          delete updatedUserData._id;
-
-          const existingUser = await userCollection.findOne(filter);
-          if (!existingUser) {
-            return res
-              .status(404)
-              .send({ success: false, message: "User not found" });
-          }
-
-          const updateDoc = {
-            $set: { ...updatedUserData, updatedAt: new Date() },
-          };
-          const result = await userCollection.updateOne(filter, updateDoc);
-
-          res.send({
-            success: true,
-            message: "User role updated successfully",
-            result,
-          });
-        } catch (error) {
-          console.error("PATCH Role Error:", error.message);
-          res.status(500).send({
-            success: false,
-            message: "Server Error",
-            error: error.message,
-          });
-        }
-      },
-    );
-
-    app.get("/users/role/:email", async (req, res) => {
-      const email = req.params.email;
-      const user = await userCollection.findOne({ email });
-
-      if (user) {
-        res.send({ role: user.role }); // Output: { role: "admin" }
-      } else {
-        res.status(444).send({ role: "user" });
-      }
-    });
-
+    // AWARDS ROUTES
     app.post("/awards", verifyFBToken, verifyAdmin, async (req, res) => {
       try {
         const award = req.body;
@@ -229,7 +218,6 @@ async function run() {
       }
     });
 
-    // 2. READ ALL AWARDS (সব আওয়ার্ড দেখা)
     app.get("/awards", async (req, res) => {
       try {
         const result = await awardCollection
@@ -246,11 +234,9 @@ async function run() {
       }
     });
 
-    // 3. READ SINGLE AWARD BY ID (নির্দিষ্ট একটি আওয়ার্ড দেখা)
     app.get("/awards/:id", async (req, res) => {
       try {
-        const id = req.params.id;
-        const query = { _id: new ObjectId(id) };
+        const query = { _id: new ObjectId(req.params.id) };
         const award = await awardCollection.findOne(query);
 
         if (!award) {
@@ -276,10 +262,7 @@ async function run() {
         delete updateData._id;
 
         const updateDoc = {
-          $set: {
-            ...updateData,
-            updatedAt: new Date(),
-          },
+          $set: { ...updateData, updatedAt: new Date() },
         };
 
         const result = await awardCollection.updateOne(filter, updateDoc);
@@ -304,7 +287,6 @@ async function run() {
       }
     });
 
-    // 5. DELETE AWARD (আওয়ার্ড ডিলেট করা)
     app.delete("/awards/:id", verifyFBToken, verifyAdmin, async (req, res) => {
       try {
         const result = await awardCollection.deleteOne({
@@ -331,6 +313,7 @@ async function run() {
       }
     });
 
+    // EXPERIENCES ROUTES
     app.post("/experiences", verifyFBToken, verifyAdmin, async (req, res) => {
       try {
         const experience = req.body;
@@ -351,7 +334,6 @@ async function run() {
       }
     });
 
-    // 2. READ ALL EXPERIENCES (সব এক্সপেরিয়েন্স দেখা)
     app.get("/experiences", async (req, res) => {
       try {
         const result = await experienceCollection
@@ -368,11 +350,9 @@ async function run() {
       }
     });
 
-    // 3. READ SINGLE EXPERIENCE BY ID (নির্দিষ্ট একটি এক্সপেরিয়েন্স দেখা)
     app.get("/experiences/:id", async (req, res) => {
       try {
-        const id = req.params.id;
-        const query = { _id: new ObjectId(id) };
+        const query = { _id: new ObjectId(req.params.id) };
         const experience = await experienceCollection.findOne(query);
 
         if (!experience) {
@@ -391,82 +371,65 @@ async function run() {
       }
     });
 
-    // 4. UPDATE EXPERIENCE (এক্সপেরিয়েন্স আপডেট করা)
-    app.patch(
-      "/experiences/:id",
-      verifyFBToken,
-      verifyAdmin,
-      async (req, res) => {
-        try {
-          const filter = { _id: new ObjectId(req.params.id) };
-          const updateData = { ...req.body };
-          delete updateData._id;
+    app.patch("/experiences/:id", verifyFBToken, verifyAdmin, async (req, res) => {
+      try {
+        const filter = { _id: new ObjectId(req.params.id) };
+        const updateData = { ...req.body };
+        delete updateData._id;
 
-          const updateDoc = {
-            $set: {
-              ...updateData,
-              updatedAt: new Date(),
-            },
-          };
+        const updateDoc = {
+          $set: { ...updateData, updatedAt: new Date() },
+        };
 
-          const result = await experienceCollection.updateOne(
-            filter,
-            updateDoc,
-          );
+        const result = await experienceCollection.updateOne(filter, updateDoc);
 
-          if (result.matchedCount === 0) {
-            return res
-              .status(404)
-              .send({ success: false, message: "Experience not found" });
-          }
-
-          res.send({
-            success: true,
-            message: "Experience updated successfully",
-            result,
-          });
-        } catch (error) {
-          res.status(500).send({
-            success: false,
-            message: "Failed to update experience",
-            error: error.message,
-          });
+        if (result.matchedCount === 0) {
+          return res
+            .status(404)
+            .send({ success: false, message: "Experience not found" });
         }
-      },
-    );
 
-    // 5. DELETE EXPERIENCE (এক্সপেরিয়েন্স ডিলেট করা)
-    app.delete(
-      "/experiences/:id",
-      verifyFBToken,
-      verifyAdmin,
-      async (req, res) => {
-        try {
-          const result = await experienceCollection.deleteOne({
-            _id: new ObjectId(req.params.id),
-          });
+        res.send({
+          success: true,
+          message: "Experience updated successfully",
+          result,
+        });
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: "Failed to update experience",
+          error: error.message,
+        });
+      }
+    });
 
-          if (result.deletedCount === 0) {
-            return res
-              .status(404)
-              .send({ success: false, message: "Experience not found" });
-          }
+    app.delete("/experiences/:id", verifyFBToken, verifyAdmin, async (req, res) => {
+      try {
+        const result = await experienceCollection.deleteOne({
+          _id: new ObjectId(req.params.id),
+        });
 
-          res.send({
-            success: true,
-            message: "Experience deleted successfully",
-            result,
-          });
-        } catch (error) {
-          res.status(500).send({
-            success: false,
-            message: "Invalid ID or Server Error",
-            error: error.message,
-          });
+        if (result.deletedCount === 0) {
+          return res
+            .status(404)
+            .send({ success: false, message: "Experience not found" });
         }
-      },
-    );
 
+        res.send({
+          success: true,
+          message: "Experience deleted successfully",
+          result,
+        });
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: "Invalid ID or Server Error",
+          error: error.message,
+        });
+      }
+    });
+
+    // TOOLS ROUTES
     app.post("/tools", verifyFBToken, verifyAdmin, async (req, res) => {
       try {
         const tool = req.body;
@@ -487,7 +450,6 @@ async function run() {
       }
     });
 
-    // 2. READ ALL TOOLS (সব টুল পাওয়া)
     app.get("/tools", async (req, res) => {
       try {
         const result = await toolCollection
@@ -504,11 +466,9 @@ async function run() {
       }
     });
 
-    // 3. READ SINGLE TOOL BY ID (নির্দিষ্ট কোনো টুল পাওয়া)
     app.get("/tools/:id", async (req, res) => {
       try {
-        const id = req.params.id;
-        const query = { _id: new ObjectId(id) };
+        const query = { _id: new ObjectId(req.params.id) };
         const tool = await toolCollection.findOne(query);
 
         if (!tool) {
@@ -534,10 +494,7 @@ async function run() {
         delete updateData._id;
 
         const updateDoc = {
-          $set: {
-            ...updateData,
-            updatedAt: new Date(),
-          },
+          $set: { ...updateData, updatedAt: new Date() },
         };
 
         const result = await toolCollection.updateOne(filter, updateDoc);
@@ -588,6 +545,7 @@ async function run() {
       }
     });
 
+    // RESEARCHES ROUTES
     app.post("/researches", verifyFBToken, verifyAdmin, async (req, res) => {
       try {
         const research = req.body;
@@ -626,8 +584,7 @@ async function run() {
 
     app.get("/researches/:id", async (req, res) => {
       try {
-        const id = req.params.id;
-        const query = { _id: new ObjectId(id) };
+        const query = { _id: new ObjectId(req.params.id) };
         const research = await researchCollection.findOne(query);
 
         if (!research) {
@@ -646,77 +603,65 @@ async function run() {
       }
     });
 
-    app.patch(
-      "/researches/:id",
-      verifyFBToken,
-      verifyAdmin,
-      async (req, res) => {
-        try {
-          const filter = { _id: new ObjectId(req.params.id) };
-          const updateData = { ...req.body };
-          delete updateData._id;
+    app.patch("/researches/:id", verifyFBToken, verifyAdmin, async (req, res) => {
+      try {
+        const filter = { _id: new ObjectId(req.params.id) };
+        const updateData = { ...req.body };
+        delete updateData._id;
 
-          const updateDoc = {
-            $set: {
-              ...updateData,
-              updatedAt: new Date(),
-            },
-          };
+        const updateDoc = {
+          $set: { ...updateData, updatedAt: new Date() },
+        };
 
-          const result = await researchCollection.updateOne(filter, updateDoc);
+        const result = await researchCollection.updateOne(filter, updateDoc);
 
-          if (result.matchedCount === 0) {
-            return res
-              .status(404)
-              .send({ success: false, message: "Research not found" });
-          }
-
-          res.send({
-            success: true,
-            message: "Research updated successfully",
-            result,
-          });
-        } catch (error) {
-          res.status(500).send({
-            success: false,
-            message: "Failed to update research",
-            error: error.message,
-          });
+        if (result.matchedCount === 0) {
+          return res
+            .status(404)
+            .send({ success: false, message: "Research not found" });
         }
-      },
-    );
 
-    app.delete(
-      "/researches/:id",
-      verifyFBToken,
-      verifyAdmin,
-      async (req, res) => {
-        try {
-          const result = await researchCollection.deleteOne({
-            _id: new ObjectId(req.params.id),
-          });
+        res.send({
+          success: true,
+          message: "Research updated successfully",
+          result,
+        });
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: "Failed to update research",
+          error: error.message,
+        });
+      }
+    });
 
-          if (result.deletedCount === 0) {
-            return res
-              .status(404)
-              .send({ success: false, message: "Research not found" });
-          }
+    app.delete("/researches/:id", verifyFBToken, verifyAdmin, async (req, res) => {
+      try {
+        const result = await researchCollection.deleteOne({
+          _id: new ObjectId(req.params.id),
+        });
 
-          res.send({
-            success: true,
-            message: "Research deleted successfully",
-            result,
-          });
-        } catch (error) {
-          res.status(500).send({
-            success: false,
-            message: "Invalid ID or Server Error",
-            error: error.message,
-          });
+        if (result.deletedCount === 0) {
+          return res
+            .status(404)
+            .send({ success: false, message: "Research not found" });
         }
-      },
-    );
 
+        res.send({
+          success: true,
+          message: "Research deleted successfully",
+          result,
+        });
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: "Invalid ID or Server Error",
+          error: error.message,
+        });
+      }
+    });
+
+    // COURSES ROUTES
     app.post("/courses", verifyFBToken, verifyAdmin, async (req, res) => {
       try {
         const course = req.body;
@@ -755,8 +700,7 @@ async function run() {
 
     app.get("/courses/:id", async (req, res) => {
       try {
-        const id = req.params.id;
-        const query = { _id: new ObjectId(id) };
+        const query = { _id: new ObjectId(req.params.id) };
         const course = await courseCollection.findOne(query);
 
         if (!course) {
@@ -782,10 +726,7 @@ async function run() {
         delete updateData._id;
 
         const updateDoc = {
-          $set: {
-            ...updateData,
-            updatedAt: new Date(),
-          },
+          $set: { ...updateData, updatedAt: new Date() },
         };
 
         const result = await courseCollection.updateOne(filter, updateDoc);
@@ -836,6 +777,7 @@ async function run() {
       }
     });
 
+    // ACADEMICS ROUTES
     app.post("/academics", verifyFBToken, verifyAdmin, async (req, res) => {
       try {
         const academic = req.body;
@@ -874,8 +816,7 @@ async function run() {
 
     app.get("/academics/:id", async (req, res) => {
       try {
-        const id = req.params.id;
-        const query = { _id: new ObjectId(id) };
+        const query = { _id: new ObjectId(req.params.id) };
         const academic = await academicCollection.findOne(query);
 
         if (!academic) {
@@ -894,77 +835,65 @@ async function run() {
       }
     });
 
-    app.patch(
-      "/academics/:id",
-      verifyFBToken,
-      verifyAdmin,
-      async (req, res) => {
-        try {
-          const filter = { _id: new ObjectId(req.params.id) };
-          const updateData = { ...req.body };
-          delete updateData._id;
+    app.patch("/academics/:id", verifyFBToken, verifyAdmin, async (req, res) => {
+      try {
+        const filter = { _id: new ObjectId(req.params.id) };
+        const updateData = { ...req.body };
+        delete updateData._id;
 
-          const updateDoc = {
-            $set: {
-              ...updateData,
-              updatedAt: new Date(),
-            },
-          };
+        const updateDoc = {
+          $set: { ...updateData, updatedAt: new Date() },
+        };
 
-          const result = await academicCollection.updateOne(filter, updateDoc);
+        const result = await academicCollection.updateOne(filter, updateDoc);
 
-          if (result.matchedCount === 0) {
-            return res
-              .status(404)
-              .send({ success: false, message: "Academic record not found" });
-          }
-
-          res.send({
-            success: true,
-            message: "Academic record updated successfully",
-            result,
-          });
-        } catch (error) {
-          res.status(500).send({
-            success: false,
-            message: "Failed to update academic record",
-            error: error.message,
-          });
+        if (result.matchedCount === 0) {
+          return res
+            .status(404)
+            .send({ success: false, message: "Academic record not found" });
         }
-      },
-    );
 
-    app.delete(
-      "/academics/:id",
-      verifyFBToken,
-      verifyAdmin,
-      async (req, res) => {
-        try {
-          const result = await academicCollection.deleteOne({
-            _id: new ObjectId(req.params.id),
-          });
+        res.send({
+          success: true,
+          message: "Academic record updated successfully",
+          result,
+        });
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: "Failed to update academic record",
+          error: error.message,
+        });
+      }
+    });
 
-          if (result.deletedCount === 0) {
-            return res
-              .status(404)
-              .send({ success: false, message: "Academic record not found" });
-          }
+    app.delete("/academics/:id", verifyFBToken, verifyAdmin, async (req, res) => {
+      try {
+        const result = await academicCollection.deleteOne({
+          _id: new ObjectId(req.params.id),
+        });
 
-          res.send({
-            success: true,
-            message: "Academic record deleted successfully",
-            result,
-          });
-        } catch (error) {
-          res.status(500).send({
-            success: false,
-            message: "Invalid ID or Server Error",
-            error: error.message,
-          });
+        if (result.deletedCount === 0) {
+          return res
+            .status(404)
+            .send({ success: false, message: "Academic record not found" });
         }
-      },
-    );
 
+        res.send({
+          success: true,
+          message: "Academic record deleted successfully",
+          result,
+        });
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: "Invalid ID or Server Error",
+          error: error.message,
+        });
+      }
+    });
+
+    // GALLERY ROUTES
     app.post("/gallery", verifyFBToken, verifyAdmin, async (req, res) => {
       try {
         const item = req.body;
@@ -984,6 +913,7 @@ async function run() {
         });
       }
     });
+
     app.get("/gallery", async (req, res) => {
       try {
         const result = await galleryCollection
@@ -1002,8 +932,7 @@ async function run() {
 
     app.get("/gallery/:id", async (req, res) => {
       try {
-        const id = req.params.id;
-        const query = { _id: new ObjectId(id) };
+        const query = { _id: new ObjectId(req.params.id) };
         const item = await galleryCollection.findOne(query);
 
         if (!item) {
@@ -1029,10 +958,7 @@ async function run() {
         delete updateData._id;
 
         const updateDoc = {
-          $set: {
-            ...updateData,
-            updatedAt: new Date(),
-          },
+          $set: { ...updateData, updatedAt: new Date() },
         };
 
         const result = await galleryCollection.updateOne(filter, updateDoc);
@@ -1083,6 +1009,7 @@ async function run() {
       }
     });
 
+    // REFEREES ROUTES
     app.post("/referees", verifyFBToken, verifyAdmin, async (req, res) => {
       try {
         const referee = req.body;
@@ -1121,8 +1048,7 @@ async function run() {
 
     app.get("/referees/:id", async (req, res) => {
       try {
-        const id = req.params.id;
-        const query = { _id: new ObjectId(id) };
+        const query = { _id: new ObjectId(req.params.id) };
         const referee = await refereeCollection.findOne(query);
 
         if (!referee) {
@@ -1148,10 +1074,7 @@ async function run() {
         delete updateData._id;
 
         const updateDoc = {
-          $set: {
-            ...updateData,
-            updatedAt: new Date(),
-          },
+          $set: { ...updateData, updatedAt: new Date() },
         };
 
         const result = await refereeCollection.updateOne(filter, updateDoc);
@@ -1176,62 +1099,52 @@ async function run() {
       }
     });
 
-    app.delete(
-      "/referees/:id",
-      verifyFBToken,
-      verifyAdmin,
-      async (req, res) => {
-        try {
-          const result = await refereeCollection.deleteOne({
-            _id: new ObjectId(req.params.id),
-          });
+    app.delete("/referees/:id", verifyFBToken, verifyAdmin, async (req, res) => {
+      try {
+        const result = await refereeCollection.deleteOne({
+          _id: new ObjectId(req.params.id),
+        });
 
-          if (result.deletedCount === 0) {
-            return res
-              .status(404)
-              .send({ success: false, message: "Referee not found" });
-          }
-
-          res.send({
-            success: true,
-            message: "Referee deleted successfully",
-            result,
-          });
-        } catch (error) {
-          res.status(500).send({
-            success: false,
-            message: "Invalid ID or Server Error",
-            error: error.message,
-          });
+        if (result.deletedCount === 0) {
+          return res
+            .status(404)
+            .send({ success: false, message: "Referee not found" });
         }
-      },
-    );
 
-    app.post(
-      "/project-supervision",
-      verifyFBToken,
-      verifyAdmin,
-      async (req, res) => {
-        try {
-          const supervision = req.body;
-          supervision.createdAt = new Date();
+        res.send({
+          success: true,
+          message: "Referee deleted successfully",
+          result,
+        });
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: "Invalid ID or Server Error",
+          error: error.message,
+        });
+      }
+    });
 
-          const result =
-            await projectSupervisionCollection.insertOne(supervision);
-          res.status(201).send({
-            success: true,
-            message: "Project supervision record added successfully",
-            result,
-          });
-        } catch (error) {
-          res.status(500).send({
-            success: false,
-            message: "Failed to add project supervision record",
-            error: error.message,
-          });
-        }
-      },
-    );
+    // PROJECT SUPERVISION ROUTES
+    app.post("/project-supervision", verifyFBToken, verifyAdmin, async (req, res) => {
+      try {
+        const supervision = req.body;
+        supervision.createdAt = new Date();
+
+        const result = await projectSupervisionCollection.insertOne(supervision);
+        res.status(201).send({
+          success: true,
+          message: "Project supervision record added successfully",
+          result,
+        });
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: "Failed to add project supervision record",
+          error: error.message,
+        });
+      }
+    });
 
     app.get("/project-supervision", async (req, res) => {
       try {
@@ -1251,8 +1164,7 @@ async function run() {
 
     app.get("/project-supervision/:id", async (req, res) => {
       try {
-        const id = req.params.id;
-        const query = { _id: new ObjectId(id) };
+        const query = { _id: new ObjectId(req.params.id) };
         const supervision = await projectSupervisionCollection.findOne(query);
 
         if (!supervision) {
@@ -1272,82 +1184,67 @@ async function run() {
       }
     });
 
-    app.patch(
-      "/project-supervision/:id",
-      verifyFBToken,
-      verifyAdmin,
-      async (req, res) => {
-        try {
-          const filter = { _id: new ObjectId(req.params.id) };
-          const updateData = { ...req.body };
-          delete updateData._id;
+    app.patch("/project-supervision/:id", verifyFBToken, verifyAdmin, async (req, res) => {
+      try {
+        const filter = { _id: new ObjectId(req.params.id) };
+        const updateData = { ...req.body };
+        delete updateData._id;
 
-          const updateDoc = {
-            $set: {
-              ...updateData,
-              updatedAt: new Date(),
-            },
-          };
+        const updateDoc = {
+          $set: { ...updateData, updatedAt: new Date() },
+        };
 
-          const result = await projectSupervisionCollection.updateOne(
-            filter,
-            updateDoc,
-          );
+        const result = await projectSupervisionCollection.updateOne(filter, updateDoc);
 
-          if (result.matchedCount === 0) {
-            return res.status(404).send({
-              success: false,
-              message: "Project supervision record not found",
-            });
-          }
-
-          res.send({
-            success: true,
-            message: "Project supervision record updated successfully",
-            result,
-          });
-        } catch (error) {
-          res.status(500).send({
+        if (result.matchedCount === 0) {
+          return res.status(404).send({
             success: false,
-            message: "Failed to update project supervision record",
-            error: error.message,
+            message: "Project supervision record not found",
           });
         }
-      },
-    );
 
-    app.delete(
-      "/project-supervision/:id",
-      verifyFBToken,
-      verifyAdmin,
-      async (req, res) => {
-        try {
-          const result = await projectSupervisionCollection.deleteOne({
-            _id: new ObjectId(req.params.id),
-          });
+        res.send({
+          success: true,
+          message: "Project supervision record updated successfully",
+          result,
+        });
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: "Failed to update project supervision record",
+          error: error.message,
+        });
+      }
+    });
 
-          if (result.deletedCount === 0) {
-            return res.status(404).send({
-              success: false,
-              message: "Project supervision record not found",
-            });
-          }
+    app.delete("/project-supervision/:id", verifyFBToken, verifyAdmin, async (req, res) => {
+      try {
+        const result = await projectSupervisionCollection.deleteOne({
+          _id: new ObjectId(req.params.id),
+        });
 
-          res.send({
-            success: true,
-            message: "Project supervision record deleted successfully",
-            result,
-          });
-        } catch (error) {
-          res.status(500).send({
+        if (result.deletedCount === 0) {
+          return res.status(404).send({
             success: false,
-            message: "Invalid ID or Server Error",
-            error: error.message,
+            message: "Project supervision record not found",
           });
         }
-      },
-    );
 
+        res.send({
+          success: true,
+          message: "Project supervision record deleted successfully",
+          result,
+        });
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: "Invalid ID or Server Error",
+          error: error.message,
+        });
+      }
+    });
+
+    // WORKSHOPS ROUTES
     app.post("/workshops", verifyFBToken, verifyAdmin, async (req, res) => {
       try {
         const workshop = req.body;
@@ -1386,8 +1283,7 @@ async function run() {
 
     app.get("/workshops/:id", async (req, res) => {
       try {
-        const id = req.params.id;
-        const query = { _id: new ObjectId(id) };
+        const query = { _id: new ObjectId(req.params.id) };
         const workshop = await workshopCollection.findOne(query);
 
         if (!workshop) {
@@ -1406,87 +1302,71 @@ async function run() {
       }
     });
 
-    app.patch(
-      "/workshops/:id",
-      verifyFBToken,
-      verifyAdmin,
-      async (req, res) => {
-        try {
-          const filter = { _id: new ObjectId(req.params.id) };
-          const updateData = { ...req.body };
-          delete updateData._id;
+    app.patch("/workshops/:id", verifyFBToken, verifyAdmin, async (req, res) => {
+      try {
+        const filter = { _id: new ObjectId(req.params.id) };
+        const updateData = { ...req.body };
+        delete updateData._id;
 
-          const updateDoc = {
-            $set: {
-              ...updateData,
-              updatedAt: new Date(),
-            },
-          };
+        const updateDoc = {
+          $set: { ...updateData, updatedAt: new Date() },
+        };
 
-          const result = await workshopCollection.updateOne(filter, updateDoc);
+        const result = await workshopCollection.updateOne(filter, updateDoc);
 
-          if (result.matchedCount === 0) {
-            return res
-              .status(404)
-              .send({ success: false, message: "Workshop not found" });
-          }
-
-          res.send({
-            success: true,
-            message: "Workshop updated successfully",
-            result,
-          });
-        } catch (error) {
-          res.status(500).send({
-            success: false,
-            message: "Failed to update workshop",
-            error: error.message,
-          });
+        if (result.matchedCount === 0) {
+          return res
+            .status(404)
+            .send({ success: false, message: "Workshop not found" });
         }
-      },
-    );
 
-    app.delete(
-      "/workshops/:id",
-      verifyFBToken,
-      verifyAdmin,
-      async (req, res) => {
-        try {
-          const result = await workshopCollection.deleteOne({
-            _id: new ObjectId(req.params.id),
-          });
+        res.send({
+          success: true,
+          message: "Workshop updated successfully",
+          result,
+        });
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: "Failed to update workshop",
+          error: error.message,
+        });
+      }
+    });
 
-          if (result.deletedCount === 0) {
-            return res
-              .status(404)
-              .send({ success: false, message: "Workshop not found" });
-          }
+    app.delete("/workshops/:id", verifyFBToken, verifyAdmin, async (req, res) => {
+      try {
+        const result = await workshopCollection.deleteOne({
+          _id: new ObjectId(req.params.id),
+        });
 
-          res.send({
-            success: true,
-            message: "Workshop deleted successfully",
-            result,
-          });
-        } catch (error) {
-          res.status(500).send({
-            success: false,
-            message: "Invalid ID or Server Error",
-            error: error.message,
-          });
+        if (result.deletedCount === 0) {
+          return res
+            .status(404)
+            .send({ success: false, message: "Workshop not found" });
         }
-      },
-    );
 
-    // await client.db("admin").command({ ping: 1 });
-    // console.log(
-    //   "Pinged your deployment. You successfully connected to MongoDB!",
-    // );
+        res.send({
+          success: true,
+          message: "Workshop deleted successfully",
+          result,
+        });
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: "Invalid ID or Server Error",
+          error: error.message,
+        });
+      }
+    });
+
   } catch (error) {
     console.error("Database connection error:", error);
     throw error;
   }
 }
 
+// Server Initialization
 const initializeServer = () => {
   if (!serverReady) {
     serverReady = run().catch((error) => {
@@ -1494,26 +1374,20 @@ const initializeServer = () => {
       throw error;
     });
   }
-
   return serverReady;
 };
-
-app.get("/favicon.ico", (req, res) => {
-  res.status(204).end();
-});
 
 app.get("/", (req, res) => {
   res.send("Ramen Kumar Das Server Running");
 });
 
+// Vercel Serverless Export Function
 module.exports = async (req, res) => {
   try {
     await initializeServer();
-
     return app(req, res);
   } catch (error) {
     console.error("Server Initialization Error:", error);
-
     return res.status(500).json({
       success: false,
       message: "Server initialization failed",

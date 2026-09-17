@@ -9,12 +9,13 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "type": "commonjs",
   "dependencies": {
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "firebase-admin": "^14.4.0",
+    "jose": "^4.14.4",
+    "jwks-rsa": "^2.1.5",
     "mongodb": "^7.6.0"
   }
 }

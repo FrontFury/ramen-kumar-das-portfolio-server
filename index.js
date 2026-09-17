@@ -9,13 +9,15 @@ const app = express();
 const port = process.env.PORT || 3000;
 
 // Firebase Admin Setup
-const decoded = Buffer.from(process.env.FB_SERVICE_KEY, "base64").toString("utf8");
-const serviceAccount = JSON.parse(decoded);
+if (process.env.FB_SERVICE_KEY) {
+  const decoded = Buffer.from(process.env.FB_SERVICE_KEY, "base64").toString("utf8");
+  const serviceAccount = JSON.parse(decoded);
 
-if (!getApps().length) {
-  initializeApp({
-    credential: cert(serviceAccount),
-  });
+  if (!getApps().length) {
+    initializeApp({
+      credential: cert(serviceAccount),
+    });
+  }
 }
 
 // Middlewares
@@ -55,7 +57,12 @@ const client = new MongoClient(uri, {
   },
 });
 
-let serverReady = null;
+app.get("/favicon.ico", (req, res) => res.status(204).end());
+
+// Root API
+app.get("/", (req, res) => {
+  res.send("Ramen Running............");
+});
 
 async function run() {
   try {
@@ -1362,36 +1369,16 @@ async function run() {
 
   } catch (error) {
     console.error("Database connection error:", error);
-    throw error;
   }
 }
 
-// Server Initialization
-const initializeServer = () => {
-  if (!serverReady) {
-    serverReady = run().catch((error) => {
-      serverReady = null;
-      throw error;
-    });
-  }
-  return serverReady;
-};
+// Function-টি কল দেওয়া হলো 
+run().catch(console.dir);
 
-app.get("/", (req, res) => {
-  res.send("Ramen Kumar Das Server Running");
-});
+if (process.env.NODE_ENV !== "production") {
+  app.listen(port, () => {
+    console.log(`Server listening on port ${port}`);
+  });
+}
 
-// Vercel Serverless Export Function
-module.exports = async (req, res) => {
-  try {
-    await initializeServer();
-    return app(req, res);
-  } catch (error) {
-    console.error("Server Initialization Error:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Server initialization failed",
-      error: error.message,
-    });
-  }
-};
+module.exports = app;

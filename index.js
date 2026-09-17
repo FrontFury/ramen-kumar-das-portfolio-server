@@ -6,10 +6,48 @@ const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 
 const port = process.env.PORT || 3000;
 
+const { initializeApp, cert, getApps } = require("firebase-admin/app");
+const { getAuth } = require("firebase-admin/auth");
+
+const decoded = Buffer.from(process.env.FB_SERVICE_KEY, "base64").toString(
+  "utf8",
+);
+const serviceAccount = JSON.parse(decoded);
+
+// Firebase Admin Initialize (Duplicate Check সহ)
+if (!getApps().length) {
+  initializeApp({
+    credential: cert(serviceAccount),
+  });
+}
+
 // Middleware
 app.use(cors());
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ limit: "10mb", extended: true }));
+
+const verifyFBToken = async (req, res, next) => {
+  const authHeader = req.headers?.authorization;
+
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return res.status(401).send({ message: "Unauthorized Access" });
+  }
+
+  try {
+    const idToken = authHeader.split(" ")[1];
+    const decoded = await getAuth().verifyIdToken(idToken);
+
+    console.log("Decoded Token User:", decoded);
+    req.decoded_email = decoded.email;
+
+    next();
+  } catch (err) {
+    console.error("Token Verification Error:", err.message);
+    return res
+      .status(403)
+      .send({ message: "Forbidden Access", error: err.message });
+  }
+};
 
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.td56s.mongodb.net/?appName=Cluster0`;
 
@@ -20,6 +58,7 @@ const client = new MongoClient(uri, {
     deprecationErrors: true,
   },
 });
+let serverReady = null;
 
 async function run() {
   try {
@@ -37,6 +76,18 @@ async function run() {
     const refereeCollection = db.collection("referees");
     const projectSupervisionCollection = db.collection("project-supervisions");
     const workshopCollection = db.collection("workshops");
+
+    const verifyAdmin = async (req, res, next) => {
+      const email = req.decodedUser?.email || req.decoded_email;
+      const query = { email };
+      const user = await userCollection.findOne(query);
+
+      if (!user || user.role !== "admin") {
+        return res.status(403).send({ message: "forbidden access" });
+      }
+
+      next();
+    };
 
     // CREATE USER
     app.post("/users", async (req, res) => {
@@ -56,18 +107,16 @@ async function run() {
         const result = await userCollection.insertOne(user);
         res.status(201).send(result);
       } catch (error) {
-        res
-          .status(500)
-          .send({
-            success: false,
-            message: "Failed to create user",
-            error: error.message,
-          });
+        res.status(500).send({
+          success: false,
+          message: "Failed to create user",
+          error: error.message,
+        });
       }
     });
 
     // READ ALL USERS
-    app.get("/users", async (req, res) => {
+    app.get("/users", verifyFBToken, verifyAdmin, async (req, res) => {
       try {
         const result = await userCollection
           .find()
@@ -75,18 +124,16 @@ async function run() {
           .toArray();
         res.send(result);
       } catch (error) {
-        res
-          .status(500)
-          .send({
-            success: false,
-            message: "Failed to fetch users",
-            error: error.message,
-          });
+        res.status(500).send({
+          success: false,
+          message: "Failed to fetch users",
+          error: error.message,
+        });
       }
     });
 
     // DELETE USER
-    app.delete("/users/:id", async (req, res) => {
+    app.delete("/users/:id", verifyFBToken, verifyAdmin, async (req, res) => {
       try {
         const result = await userCollection.deleteOne({
           _id: new ObjectId(req.params.id),
@@ -113,38 +160,43 @@ async function run() {
     });
 
     // UPDATE USER / ROLE
-    app.patch("/users/:id/role", async (req, res) => {
-      try {
-        const filter = { _id: new ObjectId(req.params.id) };
-        const updatedUserData = { ...req.body };
-        delete updatedUserData._id;
+    app.patch(
+      "/users/:id/role",
+      verifyFBToken,
+      verifyAdmin,
+      async (req, res) => {
+        try {
+          const filter = { _id: new ObjectId(req.params.id) };
+          const updatedUserData = { ...req.body };
+          delete updatedUserData._id;
 
-        const existingUser = await userCollection.findOne(filter);
-        if (!existingUser) {
-          return res
-            .status(404)
-            .send({ success: false, message: "User not found" });
+          const existingUser = await userCollection.findOne(filter);
+          if (!existingUser) {
+            return res
+              .status(404)
+              .send({ success: false, message: "User not found" });
+          }
+
+          const updateDoc = {
+            $set: { ...updatedUserData, updatedAt: new Date() },
+          };
+          const result = await userCollection.updateOne(filter, updateDoc);
+
+          res.send({
+            success: true,
+            message: "User role updated successfully",
+            result,
+          });
+        } catch (error) {
+          console.error("PATCH Role Error:", error.message);
+          res.status(500).send({
+            success: false,
+            message: "Server Error",
+            error: error.message,
+          });
         }
-
-        const updateDoc = {
-          $set: { ...updatedUserData, updatedAt: new Date() },
-        };
-        const result = await userCollection.updateOne(filter, updateDoc);
-
-        res.send({
-          success: true,
-          message: "User role updated successfully",
-          result,
-        });
-      } catch (error) {
-        console.error("PATCH Role Error:", error.message);
-        res.status(500).send({
-          success: false,
-          message: "Server Error",
-          error: error.message,
-        });
-      }
-    });
+      },
+    );
 
     app.get("/users/role/:email", async (req, res) => {
       const email = req.params.email;
@@ -157,7 +209,7 @@ async function run() {
       }
     });
 
-    app.post("/awards", async (req, res) => {
+    app.post("/awards", verifyFBToken, verifyAdmin, async (req, res) => {
       try {
         const award = req.body;
         award.createdAt = new Date();
@@ -217,7 +269,7 @@ async function run() {
       }
     });
 
-    app.patch("/awards/:id", async (req, res) => {
+    app.patch("/awards/:id", verifyFBToken, verifyAdmin, async (req, res) => {
       try {
         const filter = { _id: new ObjectId(req.params.id) };
         const updateData = { ...req.body };
@@ -253,7 +305,7 @@ async function run() {
     });
 
     // 5. DELETE AWARD (আওয়ার্ড ডিলেট করা)
-    app.delete("/awards/:id", async (req, res) => {
+    app.delete("/awards/:id", verifyFBToken, verifyAdmin, async (req, res) => {
       try {
         const result = await awardCollection.deleteOne({
           _id: new ObjectId(req.params.id),
@@ -279,7 +331,7 @@ async function run() {
       }
     });
 
-    app.post("/experiences", async (req, res) => {
+    app.post("/experiences", verifyFBToken, verifyAdmin, async (req, res) => {
       try {
         const experience = req.body;
         experience.createdAt = new Date();
@@ -340,69 +392,82 @@ async function run() {
     });
 
     // 4. UPDATE EXPERIENCE (এক্সপেরিয়েন্স আপডেট করা)
-    app.patch("/experiences/:id", async (req, res) => {
-      try {
-        const filter = { _id: new ObjectId(req.params.id) };
-        const updateData = { ...req.body };
-        delete updateData._id;
+    app.patch(
+      "/experiences/:id",
+      verifyFBToken,
+      verifyAdmin,
+      async (req, res) => {
+        try {
+          const filter = { _id: new ObjectId(req.params.id) };
+          const updateData = { ...req.body };
+          delete updateData._id;
 
-        const updateDoc = {
-          $set: {
-            ...updateData,
-            updatedAt: new Date(),
-          },
-        };
+          const updateDoc = {
+            $set: {
+              ...updateData,
+              updatedAt: new Date(),
+            },
+          };
 
-        const result = await experienceCollection.updateOne(filter, updateDoc);
+          const result = await experienceCollection.updateOne(
+            filter,
+            updateDoc,
+          );
 
-        if (result.matchedCount === 0) {
-          return res
-            .status(404)
-            .send({ success: false, message: "Experience not found" });
+          if (result.matchedCount === 0) {
+            return res
+              .status(404)
+              .send({ success: false, message: "Experience not found" });
+          }
+
+          res.send({
+            success: true,
+            message: "Experience updated successfully",
+            result,
+          });
+        } catch (error) {
+          res.status(500).send({
+            success: false,
+            message: "Failed to update experience",
+            error: error.message,
+          });
         }
-
-        res.send({
-          success: true,
-          message: "Experience updated successfully",
-          result,
-        });
-      } catch (error) {
-        res.status(500).send({
-          success: false,
-          message: "Failed to update experience",
-          error: error.message,
-        });
-      }
-    });
+      },
+    );
 
     // 5. DELETE EXPERIENCE (এক্সপেরিয়েন্স ডিলেট করা)
-    app.delete("/experiences/:id", async (req, res) => {
-      try {
-        const result = await experienceCollection.deleteOne({
-          _id: new ObjectId(req.params.id),
-        });
+    app.delete(
+      "/experiences/:id",
+      verifyFBToken,
+      verifyAdmin,
+      async (req, res) => {
+        try {
+          const result = await experienceCollection.deleteOne({
+            _id: new ObjectId(req.params.id),
+          });
 
-        if (result.deletedCount === 0) {
-          return res
-            .status(404)
-            .send({ success: false, message: "Experience not found" });
+          if (result.deletedCount === 0) {
+            return res
+              .status(404)
+              .send({ success: false, message: "Experience not found" });
+          }
+
+          res.send({
+            success: true,
+            message: "Experience deleted successfully",
+            result,
+          });
+        } catch (error) {
+          res.status(500).send({
+            success: false,
+            message: "Invalid ID or Server Error",
+            error: error.message,
+          });
         }
+      },
+    );
 
-        res.send({
-          success: true,
-          message: "Experience deleted successfully",
-          result,
-        });
-      } catch (error) {
-        res.status(500).send({
-          success: false,
-          message: "Invalid ID or Server Error",
-          error: error.message,
-        });
-      }
-    });
-
-    app.post("/tools", async (req, res) => {
+    app.post("/tools", verifyFBToken, verifyAdmin, async (req, res) => {
       try {
         const tool = req.body;
         tool.createdAt = new Date();
@@ -462,8 +527,7 @@ async function run() {
       }
     });
 
-    // 4. UPDATE TOOL (টুলের তথ্য আপডেট করা)
-    app.patch("/tools/:id", async (req, res) => {
+    app.patch("/tools/:id", verifyFBToken, verifyAdmin, async (req, res) => {
       try {
         const filter = { _id: new ObjectId(req.params.id) };
         const updateData = { ...req.body };
@@ -498,8 +562,7 @@ async function run() {
       }
     });
 
-    // 5. DELETE TOOL (টুল মুছে ফেলা)
-    app.delete("/tools/:id", async (req, res) => {
+    app.delete("/tools/:id", verifyFBToken, verifyAdmin, async (req, res) => {
       try {
         const result = await toolCollection.deleteOne({
           _id: new ObjectId(req.params.id),
@@ -525,7 +588,7 @@ async function run() {
       }
     });
 
-    app.post("/researches", async (req, res) => {
+    app.post("/researches", verifyFBToken, verifyAdmin, async (req, res) => {
       try {
         const research = req.body;
         research.createdAt = new Date();
@@ -545,7 +608,6 @@ async function run() {
       }
     });
 
-    // 2. READ ALL RESEARCHES (সব রিসার্চ লিস্ট দেখা)
     app.get("/researches", async (req, res) => {
       try {
         const result = await researchCollection
@@ -562,7 +624,6 @@ async function run() {
       }
     });
 
-    // 3. READ SINGLE RESEARCH BY ID (নির্দিষ্ট কোনো রিসার্চ দেখা)
     app.get("/researches/:id", async (req, res) => {
       try {
         const id = req.params.id;
@@ -585,70 +646,78 @@ async function run() {
       }
     });
 
-    // 4. UPDATE RESEARCH (রিসার্চ তথ্য আপডেট করা)
-    app.patch("/researches/:id", async (req, res) => {
-      try {
-        const filter = { _id: new ObjectId(req.params.id) };
-        const updateData = { ...req.body };
-        delete updateData._id;
+    app.patch(
+      "/researches/:id",
+      verifyFBToken,
+      verifyAdmin,
+      async (req, res) => {
+        try {
+          const filter = { _id: new ObjectId(req.params.id) };
+          const updateData = { ...req.body };
+          delete updateData._id;
 
-        const updateDoc = {
-          $set: {
-            ...updateData,
-            updatedAt: new Date(),
-          },
-        };
+          const updateDoc = {
+            $set: {
+              ...updateData,
+              updatedAt: new Date(),
+            },
+          };
 
-        const result = await researchCollection.updateOne(filter, updateDoc);
+          const result = await researchCollection.updateOne(filter, updateDoc);
 
-        if (result.matchedCount === 0) {
-          return res
-            .status(404)
-            .send({ success: false, message: "Research not found" });
+          if (result.matchedCount === 0) {
+            return res
+              .status(404)
+              .send({ success: false, message: "Research not found" });
+          }
+
+          res.send({
+            success: true,
+            message: "Research updated successfully",
+            result,
+          });
+        } catch (error) {
+          res.status(500).send({
+            success: false,
+            message: "Failed to update research",
+            error: error.message,
+          });
         }
+      },
+    );
 
-        res.send({
-          success: true,
-          message: "Research updated successfully",
-          result,
-        });
-      } catch (error) {
-        res.status(500).send({
-          success: false,
-          message: "Failed to update research",
-          error: error.message,
-        });
-      }
-    });
+    app.delete(
+      "/researches/:id",
+      verifyFBToken,
+      verifyAdmin,
+      async (req, res) => {
+        try {
+          const result = await researchCollection.deleteOne({
+            _id: new ObjectId(req.params.id),
+          });
 
-    // 5. DELETE RESEARCH (রিসার্চ মুছে ফেলা)
-    app.delete("/researches/:id", async (req, res) => {
-      try {
-        const result = await researchCollection.deleteOne({
-          _id: new ObjectId(req.params.id),
-        });
+          if (result.deletedCount === 0) {
+            return res
+              .status(404)
+              .send({ success: false, message: "Research not found" });
+          }
 
-        if (result.deletedCount === 0) {
-          return res
-            .status(404)
-            .send({ success: false, message: "Research not found" });
+          res.send({
+            success: true,
+            message: "Research deleted successfully",
+            result,
+          });
+        } catch (error) {
+          res.status(500).send({
+            success: false,
+            message: "Invalid ID or Server Error",
+            error: error.message,
+          });
         }
+      },
+    );
 
-        res.send({
-          success: true,
-          message: "Research deleted successfully",
-          result,
-        });
-      } catch (error) {
-        res.status(500).send({
-          success: false,
-          message: "Invalid ID or Server Error",
-          error: error.message,
-        });
-      }
-    });
-
-    app.post("/courses", async (req, res) => {
+    app.post("/courses", verifyFBToken, verifyAdmin, async (req, res) => {
       try {
         const course = req.body;
         course.createdAt = new Date();
@@ -668,7 +737,6 @@ async function run() {
       }
     });
 
-    // 2. READ ALL COURSES (সব কোর্সের তালিকা পাওয়া)
     app.get("/courses", async (req, res) => {
       try {
         const result = await courseCollection
@@ -685,7 +753,6 @@ async function run() {
       }
     });
 
-    // 3. READ SINGLE COURSE BY ID (নির্দিষ্ট কোনো কোর্সের বিস্তারিত তথ্য দেখা)
     app.get("/courses/:id", async (req, res) => {
       try {
         const id = req.params.id;
@@ -708,8 +775,7 @@ async function run() {
       }
     });
 
-    // 4. UPDATE COURSE (কোর্সের তথ্য যেমন: Title, Description, Duration ইত্যাদি আপডেট করা)
-    app.patch("/courses/:id", async (req, res) => {
+    app.patch("/courses/:id", verifyFBToken, verifyAdmin, async (req, res) => {
       try {
         const filter = { _id: new ObjectId(req.params.id) };
         const updateData = { ...req.body };
@@ -744,8 +810,7 @@ async function run() {
       }
     });
 
-    // 5. DELETE COURSE (কোর্স মুছে ফেলা)
-    app.delete("/courses/:id", async (req, res) => {
+    app.delete("/courses/:id", verifyFBToken, verifyAdmin, async (req, res) => {
       try {
         const result = await courseCollection.deleteOne({
           _id: new ObjectId(req.params.id),
@@ -771,7 +836,7 @@ async function run() {
       }
     });
 
-    app.post("/academics", async (req, res) => {
+    app.post("/academics", verifyFBToken, verifyAdmin, async (req, res) => {
       try {
         const academic = req.body;
         academic.createdAt = new Date();
@@ -791,7 +856,6 @@ async function run() {
       }
     });
 
-    // 2. READ ALL ACADEMIC RECORDS (সব শিক্ষাগত তথ্য দেখা)
     app.get("/academics", async (req, res) => {
       try {
         const result = await academicCollection
@@ -830,70 +894,78 @@ async function run() {
       }
     });
 
-    // 4. UPDATE ACADEMIC RECORD (শিক্ষাগত তথ্য আপডেট করা)
-    app.patch("/academics/:id", async (req, res) => {
-      try {
-        const filter = { _id: new ObjectId(req.params.id) };
-        const updateData = { ...req.body };
-        delete updateData._id;
+    app.patch(
+      "/academics/:id",
+      verifyFBToken,
+      verifyAdmin,
+      async (req, res) => {
+        try {
+          const filter = { _id: new ObjectId(req.params.id) };
+          const updateData = { ...req.body };
+          delete updateData._id;
 
-        const updateDoc = {
-          $set: {
-            ...updateData,
-            updatedAt: new Date(),
-          },
-        };
+          const updateDoc = {
+            $set: {
+              ...updateData,
+              updatedAt: new Date(),
+            },
+          };
 
-        const result = await academicCollection.updateOne(filter, updateDoc);
+          const result = await academicCollection.updateOne(filter, updateDoc);
 
-        if (result.matchedCount === 0) {
-          return res
-            .status(404)
-            .send({ success: false, message: "Academic record not found" });
+          if (result.matchedCount === 0) {
+            return res
+              .status(404)
+              .send({ success: false, message: "Academic record not found" });
+          }
+
+          res.send({
+            success: true,
+            message: "Academic record updated successfully",
+            result,
+          });
+        } catch (error) {
+          res.status(500).send({
+            success: false,
+            message: "Failed to update academic record",
+            error: error.message,
+          });
         }
+      },
+    );
 
-        res.send({
-          success: true,
-          message: "Academic record updated successfully",
-          result,
-        });
-      } catch (error) {
-        res.status(500).send({
-          success: false,
-          message: "Failed to update academic record",
-          error: error.message,
-        });
-      }
-    });
+    app.delete(
+      "/academics/:id",
+      verifyFBToken,
+      verifyAdmin,
+      async (req, res) => {
+        try {
+          const result = await academicCollection.deleteOne({
+            _id: new ObjectId(req.params.id),
+          });
 
-    // 5. DELETE ACADEMIC RECORD (শিক্ষাগত তথ্য মুছে ফেলা)
-    app.delete("/academics/:id", async (req, res) => {
-      try {
-        const result = await academicCollection.deleteOne({
-          _id: new ObjectId(req.params.id),
-        });
+          if (result.deletedCount === 0) {
+            return res
+              .status(404)
+              .send({ success: false, message: "Academic record not found" });
+          }
 
-        if (result.deletedCount === 0) {
-          return res
-            .status(404)
-            .send({ success: false, message: "Academic record not found" });
+          res.send({
+            success: true,
+            message: "Academic record deleted successfully",
+            result,
+          });
+        } catch (error) {
+          res.status(500).send({
+            success: false,
+            message: "Invalid ID or Server Error",
+            error: error.message,
+          });
         }
+      },
+    );
 
-        res.send({
-          success: true,
-          message: "Academic record deleted successfully",
-          result,
-        });
-      } catch (error) {
-        res.status(500).send({
-          success: false,
-          message: "Invalid ID or Server Error",
-          error: error.message,
-        });
-      }
-    });
-
-    app.post("/gallery", async (req, res) => {
+    app.post("/gallery", verifyFBToken, verifyAdmin, async (req, res) => {
       try {
         const item = req.body;
         item.createdAt = new Date();
@@ -912,8 +984,6 @@ async function run() {
         });
       }
     });
-
-    // 2. READ ALL GALLERY ITEMS (গ্যালারির সব আইটেম দেখা)
     app.get("/gallery", async (req, res) => {
       try {
         const result = await galleryCollection
@@ -930,7 +1000,6 @@ async function run() {
       }
     });
 
-    // 3. READ SINGLE GALLERY ITEM BY ID (নির্দিষ্ট একটি গ্যালারি আইটেম দেখা)
     app.get("/gallery/:id", async (req, res) => {
       try {
         const id = req.params.id;
@@ -953,8 +1022,7 @@ async function run() {
       }
     });
 
-    // 4. UPDATE GALLERY ITEM (গ্যালারি আইটেমের তথ্য আপডেট করা)
-    app.patch("/gallery/:id", async (req, res) => {
+    app.patch("/gallery/:id", verifyFBToken, verifyAdmin, async (req, res) => {
       try {
         const filter = { _id: new ObjectId(req.params.id) };
         const updateData = { ...req.body };
@@ -989,8 +1057,7 @@ async function run() {
       }
     });
 
-    // 5. DELETE GALLERY ITEM (গ্যালারি আইটেম মুছে ফেলা)
-    app.delete("/gallery/:id", async (req, res) => {
+    app.delete("/gallery/:id", verifyFBToken, verifyAdmin, async (req, res) => {
       try {
         const result = await galleryCollection.deleteOne({
           _id: new ObjectId(req.params.id),
@@ -1016,7 +1083,7 @@ async function run() {
       }
     });
 
-    app.post("/referees", async (req, res) => {
+    app.post("/referees", verifyFBToken, verifyAdmin, async (req, res) => {
       try {
         const referee = req.body;
         referee.createdAt = new Date();
@@ -1036,7 +1103,6 @@ async function run() {
       }
     });
 
-    // 2. READ ALL REFEREES (সব রেফারি তথ্য দেখা)
     app.get("/referees", async (req, res) => {
       try {
         const result = await refereeCollection
@@ -1053,7 +1119,6 @@ async function run() {
       }
     });
 
-    // 3. READ SINGLE REFEREE BY ID (নির্দিষ্ট এক রেফারি তথ্য দেখা)
     app.get("/referees/:id", async (req, res) => {
       try {
         const id = req.params.id;
@@ -1076,8 +1141,7 @@ async function run() {
       }
     });
 
-    // 4. UPDATE REFEREE (রেফারির নাম, পদবী, ইমেইল, বা ফোন আপডেট করা)
-    app.patch("/referees/:id", async (req, res) => {
+    app.patch("/referees/:id", verifyFBToken, verifyAdmin, async (req, res) => {
       try {
         const filter = { _id: new ObjectId(req.params.id) };
         const updateData = { ...req.body };
@@ -1112,55 +1176,63 @@ async function run() {
       }
     });
 
-    // 5. DELETE REFEREE (রেফারি মুছে ফেলা)
-    app.delete("/referees/:id", async (req, res) => {
-      try {
-        const result = await refereeCollection.deleteOne({
-          _id: new ObjectId(req.params.id),
-        });
+    app.delete(
+      "/referees/:id",
+      verifyFBToken,
+      verifyAdmin,
+      async (req, res) => {
+        try {
+          const result = await refereeCollection.deleteOne({
+            _id: new ObjectId(req.params.id),
+          });
 
-        if (result.deletedCount === 0) {
-          return res
-            .status(404)
-            .send({ success: false, message: "Referee not found" });
+          if (result.deletedCount === 0) {
+            return res
+              .status(404)
+              .send({ success: false, message: "Referee not found" });
+          }
+
+          res.send({
+            success: true,
+            message: "Referee deleted successfully",
+            result,
+          });
+        } catch (error) {
+          res.status(500).send({
+            success: false,
+            message: "Invalid ID or Server Error",
+            error: error.message,
+          });
         }
+      },
+    );
 
-        res.send({
-          success: true,
-          message: "Referee deleted successfully",
-          result,
-        });
-      } catch (error) {
-        res.status(500).send({
-          success: false,
-          message: "Invalid ID or Server Error",
-          error: error.message,
-        });
-      }
-    });
+    app.post(
+      "/project-supervision",
+      verifyFBToken,
+      verifyAdmin,
+      async (req, res) => {
+        try {
+          const supervision = req.body;
+          supervision.createdAt = new Date();
 
-    app.post("/project-supervision", async (req, res) => {
-      try {
-        const supervision = req.body;
-        supervision.createdAt = new Date();
+          const result =
+            await projectSupervisionCollection.insertOne(supervision);
+          res.status(201).send({
+            success: true,
+            message: "Project supervision record added successfully",
+            result,
+          });
+        } catch (error) {
+          res.status(500).send({
+            success: false,
+            message: "Failed to add project supervision record",
+            error: error.message,
+          });
+        }
+      },
+    );
 
-        const result =
-          await projectSupervisionCollection.insertOne(supervision);
-        res.status(201).send({
-          success: true,
-          message: "Project supervision record added successfully",
-          result,
-        });
-      } catch (error) {
-        res.status(500).send({
-          success: false,
-          message: "Failed to add project supervision record",
-          error: error.message,
-        });
-      }
-    });
-
-    // 2. READ ALL PROJECT SUPERVISIONS
     app.get("/project-supervision", async (req, res) => {
       try {
         const result = await projectSupervisionCollection
@@ -1177,7 +1249,6 @@ async function run() {
       }
     });
 
-    // 3. READ SINGLE PROJECT SUPERVISION BY ID
     app.get("/project-supervision/:id", async (req, res) => {
       try {
         const id = req.params.id;
@@ -1185,12 +1256,10 @@ async function run() {
         const supervision = await projectSupervisionCollection.findOne(query);
 
         if (!supervision) {
-          return res
-            .status(404)
-            .send({
-              success: false,
-              message: "Project supervision record not found",
-            });
+          return res.status(404).send({
+            success: false,
+            message: "Project supervision record not found",
+          });
         }
 
         res.send(supervision);
@@ -1203,79 +1272,83 @@ async function run() {
       }
     });
 
-    // 4. UPDATE PROJECT SUPERVISION
-    app.patch("/project-supervision/:id", async (req, res) => {
-      try {
-        const filter = { _id: new ObjectId(req.params.id) };
-        const updateData = { ...req.body };
-        delete updateData._id;
+    app.patch(
+      "/project-supervision/:id",
+      verifyFBToken,
+      verifyAdmin,
+      async (req, res) => {
+        try {
+          const filter = { _id: new ObjectId(req.params.id) };
+          const updateData = { ...req.body };
+          delete updateData._id;
 
-        const updateDoc = {
-          $set: {
-            ...updateData,
-            updatedAt: new Date(),
-          },
-        };
+          const updateDoc = {
+            $set: {
+              ...updateData,
+              updatedAt: new Date(),
+            },
+          };
 
-        const result = await projectSupervisionCollection.updateOne(
-          filter,
-          updateDoc,
-        );
+          const result = await projectSupervisionCollection.updateOne(
+            filter,
+            updateDoc,
+          );
 
-        if (result.matchedCount === 0) {
-          return res
-            .status(404)
-            .send({
+          if (result.matchedCount === 0) {
+            return res.status(404).send({
               success: false,
               message: "Project supervision record not found",
             });
+          }
+
+          res.send({
+            success: true,
+            message: "Project supervision record updated successfully",
+            result,
+          });
+        } catch (error) {
+          res.status(500).send({
+            success: false,
+            message: "Failed to update project supervision record",
+            error: error.message,
+          });
         }
+      },
+    );
 
-        res.send({
-          success: true,
-          message: "Project supervision record updated successfully",
-          result,
-        });
-      } catch (error) {
-        res.status(500).send({
-          success: false,
-          message: "Failed to update project supervision record",
-          error: error.message,
-        });
-      }
-    });
+    app.delete(
+      "/project-supervision/:id",
+      verifyFBToken,
+      verifyAdmin,
+      async (req, res) => {
+        try {
+          const result = await projectSupervisionCollection.deleteOne({
+            _id: new ObjectId(req.params.id),
+          });
 
-    // 5. DELETE PROJECT SUPERVISION
-    app.delete("/project-supervision/:id", async (req, res) => {
-      try {
-        const result = await projectSupervisionCollection.deleteOne({
-          _id: new ObjectId(req.params.id),
-        });
-
-        if (result.deletedCount === 0) {
-          return res
-            .status(404)
-            .send({
+          if (result.deletedCount === 0) {
+            return res.status(404).send({
               success: false,
               message: "Project supervision record not found",
             });
+          }
+
+          res.send({
+            success: true,
+            message: "Project supervision record deleted successfully",
+            result,
+          });
+        } catch (error) {
+          res.status(500).send({
+            success: false,
+            message: "Invalid ID or Server Error",
+            error: error.message,
+          });
         }
+      },
+    );
 
-        res.send({
-          success: true,
-          message: "Project supervision record deleted successfully",
-          result,
-        });
-      } catch (error) {
-        res.status(500).send({
-          success: false,
-          message: "Invalid ID or Server Error",
-          error: error.message,
-        });
-      }
-    });
-
-    app.post("/workshops", async (req, res) => {
+    app.post("/workshops", verifyFBToken, verifyAdmin, async (req, res) => {
       try {
         const workshop = req.body;
         workshop.createdAt = new Date();
@@ -1295,7 +1368,6 @@ async function run() {
       }
     });
 
-    // 2. READ ALL WORKSHOPS
     app.get("/workshops", async (req, res) => {
       try {
         const result = await workshopCollection
@@ -1312,7 +1384,6 @@ async function run() {
       }
     });
 
-    // 3. READ SINGLE WORKSHOP BY ID
     app.get("/workshops/:id", async (req, res) => {
       try {
         const id = req.params.id;
@@ -1335,83 +1406,118 @@ async function run() {
       }
     });
 
-    // 4. UPDATE WORKSHOP
-    app.patch("/workshops/:id", async (req, res) => {
-      try {
-        const filter = { _id: new ObjectId(req.params.id) };
-        const updateData = { ...req.body };
-        delete updateData._id;
+    app.patch(
+      "/workshops/:id",
+      verifyFBToken,
+      verifyAdmin,
+      async (req, res) => {
+        try {
+          const filter = { _id: new ObjectId(req.params.id) };
+          const updateData = { ...req.body };
+          delete updateData._id;
 
-        const updateDoc = {
-          $set: {
-            ...updateData,
-            updatedAt: new Date(),
-          },
-        };
+          const updateDoc = {
+            $set: {
+              ...updateData,
+              updatedAt: new Date(),
+            },
+          };
 
-        const result = await workshopCollection.updateOne(filter, updateDoc);
+          const result = await workshopCollection.updateOne(filter, updateDoc);
 
-        if (result.matchedCount === 0) {
-          return res
-            .status(404)
-            .send({ success: false, message: "Workshop not found" });
+          if (result.matchedCount === 0) {
+            return res
+              .status(404)
+              .send({ success: false, message: "Workshop not found" });
+          }
+
+          res.send({
+            success: true,
+            message: "Workshop updated successfully",
+            result,
+          });
+        } catch (error) {
+          res.status(500).send({
+            success: false,
+            message: "Failed to update workshop",
+            error: error.message,
+          });
         }
-
-        res.send({
-          success: true,
-          message: "Workshop updated successfully",
-          result,
-        });
-      } catch (error) {
-        res.status(500).send({
-          success: false,
-          message: "Failed to update workshop",
-          error: error.message,
-        });
-      }
-    });
-
-    // 5. DELETE WORKSHOP
-    app.delete("/workshops/:id", async (req, res) => {
-      try {
-        const result = await workshopCollection.deleteOne({
-          _id: new ObjectId(req.params.id),
-        });
-
-        if (result.deletedCount === 0) {
-          return res
-            .status(404)
-            .send({ success: false, message: "Workshop not found" });
-        }
-
-        res.send({
-          success: true,
-          message: "Workshop deleted successfully",
-          result,
-        });
-      } catch (error) {
-        res.status(500).send({
-          success: false,
-          message: "Invalid ID or Server Error",
-          error: error.message,
-        });
-      }
-    });
-
-    await client.db("admin").command({ ping: 1 });
-    console.log(
-      "Pinged your deployment. You successfully connected to MongoDB!",
+      },
     );
+
+    app.delete(
+      "/workshops/:id",
+      verifyFBToken,
+      verifyAdmin,
+      async (req, res) => {
+        try {
+          const result = await workshopCollection.deleteOne({
+            _id: new ObjectId(req.params.id),
+          });
+
+          if (result.deletedCount === 0) {
+            return res
+              .status(404)
+              .send({ success: false, message: "Workshop not found" });
+          }
+
+          res.send({
+            success: true,
+            message: "Workshop deleted successfully",
+            result,
+          });
+        } catch (error) {
+          res.status(500).send({
+            success: false,
+            message: "Invalid ID or Server Error",
+            error: error.message,
+          });
+        }
+      },
+    );
+
+    // await client.db("admin").command({ ping: 1 });
+    // console.log(
+    //   "Pinged your deployment. You successfully connected to MongoDB!",
+    // );
   } catch (error) {
     console.error("Database connection error:", error);
+    throw error;
   }
 }
-run().catch(console.dir);
+
+const initializeServer = () => {
+  if (!serverReady) {
+    serverReady = run().catch((error) => {
+      serverReady = null;
+      throw error;
+    });
+  }
+
+  return serverReady;
+};
+
+app.get("/favicon.ico", (req, res) => {
+  res.status(204).end();
+});
 
 app.get("/", (req, res) => {
   res.send("Ramen Kumar Das Server Running");
 });
 
-app.listen(port, () => {
-  console.log(`Example app listening on port ${port}`);
-});
+module.exports = async (req, res) => {
+  try {
+    await initializeServer();
+
+    return app(req, res);
+  } catch (error) {
+    console.error("Server Initialization Error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Server initialization failed",
+      error: error.message,
+    });
+  }
+};

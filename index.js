@@ -101,6 +101,7 @@ async function run() {
     const projectSupervisionCollection = db.collection("project-supervisions");
     const workshopCollection = db.collection("workshops");
     const membershipCollection = db.collection("memberships");
+    const journalCollection = db.collection("journals");
     const otpCollection = db.collection("otps");
 
     // 1. Send OTP Route
@@ -138,7 +139,7 @@ async function run() {
         const mailOptions = {
           from: `"Ramen Kumar Das" <${process.env.EMAIL_USER}>`,
           to: email,
-          subject: `${otp} - Ramen Kumar Das Verification Code`,
+          subject: `Ramen Kumar Das Verification Code - ${otp}`,
           html: `
     <div style="font-family: Arial, sans-serif; max-width: 500px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px;">
       <!-- App Logo Banner -->
@@ -1694,6 +1695,91 @@ async function run() {
         }
       },
     );
+    app.post("/journals", async (req, res) => {
+      try {
+        const journal = req.body;
+        // ডিফল্ট ফিল্ড যুক্ত করা (যেমন: তৈরির সময়)
+        journal.createdAt = new Date().toISOString();
+
+        const result = await journalCollection.insertOne(journal);
+        res.status(201).send({ success: true, message: "Journal created successfully", result });
+      } catch (error) {
+        res.status(500).send({ success: false, message: error.message });
+      }
+    });
+
+    app.get("/journals", async (req, res) => {
+      try {
+        const email = req.query.email;
+        let query = {};
+        
+        if (email) {
+          query = { userEmail: email };
+        }
+
+        const result = await journalCollection.find(query).sort({ createdAt: -1 }).toArray();
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({ success: false, message: error.message });
+      }
+    });
+
+    app.get("/journals/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+        const query = { _id: new ObjectId(id) };
+        const result = await journalCollection.findOne(query);
+
+        if (!result) {
+          return res.status(404).send({ success: false, message: "Journal not found" });
+        }
+
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({ success: false, message: "Invalid ID format or server error" });
+      }
+    });
+
+    app.patch("/journals/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+        const updatedData = req.body;
+        const filter = { _id: new ObjectId(id) };
+
+        const updatedDoc = {
+          $set: {
+            ...updatedData,
+            updatedAt: new Date().toISOString(), // আপডেট করার সময়
+          },
+        };
+
+        const result = await journalCollection.updateOne(filter, updatedDoc);
+
+        if (result.matchedCount === 0) {
+          return res.status(404).send({ success: false, message: "Journal not found" });
+        }
+
+        res.send({ success: true, message: "Journal updated successfully", result });
+      } catch (error) {
+        res.status(500).send({ success: false, message: error.message });
+      }
+    });
+
+    app.delete("/journals/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+        const query = { _id: new ObjectId(id) };
+        const result = await journalCollection.deleteOne(query);
+
+        if (result.deletedCount === 0) {
+          return res.status(404).send({ success: false, message: "Journal not found" });
+        }
+
+        res.send({ success: true, message: "Journal deleted successfully", result });
+      } catch (error) {
+        res.status(500).send({ success: false, message: error.message });
+      }
+    });
     serverReadyResolve();
   } catch (error) {
     console.error("Database connection error:", error);

@@ -1695,7 +1695,7 @@ async function run() {
         }
       },
     );
-    app.post("/journals", async (req, res) => {
+    app.post("/journals",verifyFBToken,verifyAdmin, async (req, res) => {
       try {
         const journal = req.body;
         // ডিফল্ট ফিল্ড যুক্ত করা (যেমন: তৈরির সময়)
@@ -1740,7 +1740,7 @@ async function run() {
       }
     });
 
-    app.patch("/journals/:id", async (req, res) => {
+    app.patch("/journals/:id",verifyFBToken,verifyAdmin, async (req, res) => {
       try {
         const id = req.params.id;
         const updatedData = req.body;
@@ -1765,7 +1765,7 @@ async function run() {
       }
     });
 
-    app.delete("/journals/:id", async (req, res) => {
+    app.delete("/journals/:id",verifyFBToken,verifyAdmin, async (req, res) => {
       try {
         const id = req.params.id;
         const query = { _id: new ObjectId(id) };
